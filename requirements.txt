@@ -1,0 +1,23 @@
+# Office Automation Foundation - Python Dependencies
+#
+# Install with: pip install -r requirements.txt
+#
+# Note: This project is Windows-only due to Outlook COM requirements.
+
+# Core dependencies
+pywin32>=306          # Windows COM automation (required for Outlook)
+python-dotenv>=1.0.0  # Environment variable loading
+
+# Data processing
+openpyxl>=3.1.2       # Excel file handling
+pandas>=2.0.0         # Data manipulation (optional but recommended)
+
+# Parsing
+beautifulsoup4>=4.12.0  # HTML parsing
+PyYAML>=6.0.1           # YAML config support (optional)
+
+# Development (optional)
+# pytest>=7.4.0
+# pytest-cov>=4.1.0
+# black>=23.0.0
+# flake8>=6.1.0
