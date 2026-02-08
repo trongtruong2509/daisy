@@ -42,10 +42,10 @@ logger = get_logger(__name__)
 
 def print_banner():
     """Print tool banner."""
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 80)
     print("  Payslip Generator & Distributor - Phuc Long")
     print("  Powered by Daisy Foundation")
-    print("=" * 60)
+    print("=" * 80)
 
 
 def print_pre_summary(config, employee_count: int):

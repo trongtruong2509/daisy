@@ -17,6 +17,12 @@ from typing import List, Optional, Tuple
 from dotenv import load_dotenv, set_key
 
 
+RESET = "\033[0m"
+
+def _print_with_color(text: str, color_code: int = 92):
+    """Print text with ANSI color codes."""
+    print(f"\033[{color_code}m{text}{RESET}")
+
 def _str_to_bool(value: str) -> bool:
     """Convert string to boolean."""
     if not value:
@@ -47,7 +53,7 @@ def _prompt_for_value(
         validator: Optional callable(value) -> (is_valid: bool, error_msg: str)
                   Returns tuple of (is_valid, error_message)
     """
-    print(f"\n{description}")
+    _print_with_color(f"{description}", 33)
     if example:
         print(f"Example: {example}")
     while True:
@@ -153,7 +159,7 @@ def _get_outlook_accounts() -> List[str]:
     
     except Exception as e:
         # Outlook not available or error occurred
-        print(f"  Note: Could not retrieve Outlook accounts: {e}")
+        _print_with_color(f"  Note: Could not retrieve Outlook accounts: {e}", 31)
         return []
 
 
@@ -174,7 +180,7 @@ def _prompt_for_outlook_account() -> str:
         validator = _validate_email_format
     else:
         # Show menu of available accounts
-        print("\nOutlook account email is required. Choose your Outlook profile:")
+        _print_with_color("\nOutlook account email is required. Choose your Outlook profile:", 33)
         for i, account in enumerate(accounts, 1):
             print(f"  [{i}] {account}")
         

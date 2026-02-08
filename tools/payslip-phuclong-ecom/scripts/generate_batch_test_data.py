@@ -2,7 +2,10 @@
 Generate batch test data for payslip tool.
 
 Copies TBKQ-phuclong.xls to a new test file and populates it with 200+ employees.
-Employee emails are randomly assigned between two addresses for testing multiple account sends.
+
+Structure:
+- bang luong sheet: Master employee data (MNV in column L, Name in column M)
+- Data sheet: Mapping with MNV in column A, formulas pulling from bang luong, Email in column C
 """
 
 import random
@@ -10,22 +13,15 @@ import sys
 import shutil
 from pathlib import Path
 
-# Try openpyxl first (works with .xlsx), then fallback to other methods
-try:
-    import openpyxl
-    HAS_OPENPYXL = True
-except ImportError:
-    HAS_OPENPYXL = False
-
 try:
     import win32com.client as win32
     HAS_WIN32COM = True
 except ImportError:
     HAS_WIN32COM = False
 
-if not HAS_OPENPYXL and not HAS_WIN32COM:
-    print("ERROR: Neither openpyxl nor pywin32 available.")
-    print("Install one with: pip install openpyxl  or  pip install pywin32")
+if not HAS_WIN32COM:
+    print("ERROR: pywin32 not available. Required for .xls files.")
+    print("Install with: pip install pywin32")
     sys.exit(1)
 
 
@@ -56,163 +52,138 @@ def generate_vietnamese_name():
     return f"{first} {middle} {last}"
 
 
-def generate_with_openpyxl(source_file: Path, output_file: Path, num_employees: int = 200):
-    """Generate batch file using openpyxl (for .xlsx files)."""
-    print(f"[1/3] Copying Excel file...")
-    shutil.copy2(source_file, output_file)
-    print(f"      ✓ Copied")
+def generate_batch_test_file(source_file: Path, output_file: Path, num_employees: int = 200):
+    """
+    Generate batch test file with employees in both bang luong and Data sheets.
     
-    print(f"[2/3] Loading and populating with openpyxl...")
-    wb = openpyxl.load_workbook(output_file)
-    
-    try:
-        ws = wb["Data"]
-    except KeyError:
-        print(f"      ✗ Could not find 'Data' sheet")
+    Uses batch writes for better performance.
+    """
+    if not source_file.exists():
+        print(f"ERROR: Source file not found: {source_file}")
         return False
     
-    # Column positions
-    col_a, col_b, col_c = 1, 2, 3  # A, B, C
-    col_az = 52  # AZ
-    start_row = 4
-    
-    # Get existing password
-    existing_password = ws.cell(start_row, col_az).value
-    print(f"      - Existing password sample: {existing_password}")
-    
-    # Generate data
-    mnv_counter = 6046073
-    for i in range(num_employees):
-        row = start_row + i
-        ws.cell(row, col_a).value = mnv_counter
-        ws.cell(row, col_b).value = generate_vietnamese_name()
-        ws.cell(row, col_c).value = random.choice(TEST_EMAILS)
-        ws.cell(row, col_az).value = existing_password
-        mnv_counter += 1
-        
-        if (i + 1) % 50 == 0:
-            print(f"      - Generated {i + 1}/{num_employees}...")
-    
-    print(f"[3/3] Saving file...")
-    wb.save(output_file)
-    wb.close()
-    
-    # Calculate stats
-    emails = [ws.cell(start_row + i, col_c).value for i in range(num_employees)]
-    email_count = {email: emails.count(email) for email in TEST_EMAILS}
-    
-    print(f"      ✓ Saved")
-    print(f"      - Email distribution:")
-    for email, count in email_count.items():
-        pct = (count / num_employees) * 100
-        print(f"        • {email}: {count} ({pct:.1f}%)")
-    
-    return True
-
-
-def generate_with_win32com(source_file: Path, output_file: Path, num_employees: int = 200):
-    """Generate batch file using Excel COM."""
     print(f"[1/4] Copying Excel file...")
     shutil.copy2(source_file, output_file)
     print(f"      ✓ Copied")
     
-    print(f"[2/4] Opening Excel via COM...")
+    print(f"[2/4] Opening Excel file via COM...")
     excel = None
     workbook = None
     try:
         excel = win32.Dispatch("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
+        excel.ScreenUpdating = False  # Disable screen updates for speed
         
         workbook = excel.Workbooks.Open(str(output_file), UpdateLinks=0)
+        bang_luong = workbook.Sheets("bang luong")
         data_sheet = workbook.Sheets("Data")
         print(f"      ✓ Opened")
     except Exception as e:
-        print(f"      ✗ Failed: {e}")
+        print(f"      ✗ Failed to open: {e}")
         return False
     
     try:
-        print(f"[3/4] Generating {num_employees} employees...")
+        print(f"[3/4] Populating {num_employees} employees...")
         
-        col_a, col_b, col_c, col_az = 1, 2, 3, 52
-        start_row = 4
+        # Column positions
+        col_l = 12  # MNV in bang luong
+        col_m = 13  # Name in bang luong
+        col_a = 1   # MNV in Data
+        col_c = 3   # Email in Data
         
-        existing_password = data_sheet.Cells(start_row, col_az).Value
-        print(f"      - Password sample: {existing_password}")
+        # bang luong: Data starts at row 3
+        # Data sheet: Data starts at row 4
+        bl_start_row = 3
+        data_start_row = 4
         
+        # Pre-generate all data first
+        print(f"      - Pre-generating {num_employees} rows...")
         mnv_counter = 6046073
-        for i in range(num_employees):
-            row = start_row + i
-            data_sheet.Cells(row, col_a).Value = mnv_counter
-            data_sheet.Cells(row, col_b).Value = generate_vietnamese_name()
-            data_sheet.Cells(row, col_c).Value = random.choice(TEST_EMAILS)
-            data_sheet.Cells(row, col_az).Value = existing_password
-            mnv_counter += 1
-            
-            if (i + 1) % 50 == 0:
-                print(f"      - Generated {i + 1}/{num_employees}...")
+        bl_data = []
+        data_mnv = []
+        data_email = []
         
-        print(f"[4/4] Saving...")
-        workbook.Save()
-        print(f"      ✓ Saved")
+        for i in range(num_employees):
+            mnv = mnv_counter + i
+            name = generate_vietnamese_name()
+            email = random.choice(TEST_EMAILS)
+            
+            bl_data.append([mnv, name])
+            data_mnv.append([mnv])
+            data_email.append([email])
+        
+        # Write bang luong data (column L:M)
+        print(f"      - Writing bang luong data...")
+        bl_range = bang_luong.Range(
+            f"L{bl_start_row}:M{bl_start_row + num_employees - 1}"
+        )
+        bl_range.Value = bl_data
+        
+        # Write Data sheet MNV (column A)
+        print(f"      - Writing Data sheet MNV...")
+        data_mnv_range = data_sheet.Range(
+            f"A{data_start_row}:A{data_start_row + num_employees - 1}"
+        )
+        data_mnv_range.Value = data_mnv
+        
+        # Write Data sheet Email (column C)
+        print(f"      - Writing Data sheet Email...")
+        data_email_range = data_sheet.Range(
+            f"C{data_start_row}:C{data_start_row + num_employees - 1}"
+        )
+        data_email_range.Value = data_email
+        
+        print(f"      ✓ Generated {num_employees} employees")
+        
+        # Count email distribution
+        email_count = {email: data_email.count([email]) for email in TEST_EMAILS}
+        flat_emails = [e[0] for e in data_email]
+        email_count = {email: flat_emails.count(email) for email in TEST_EMAILS}
+        print(f"      - Email distribution:")
+        for email, count in email_count.items():
+            pct = (count / num_employees) * 100
+            print(f"        • {email}: {count} ({pct:.1f}%)")
         
     finally:
+        excel.ScreenUpdating = True  # Re-enable screen updates
+        print(f"[4/4] Saving file...")
         try:
-            workbook.Close(SaveChanges=False)
-        except:
-            pass
-        try:
-            excel.Quit()
-        except:
-            pass
+            workbook.Save()
+            print(f"      ✓ Saved")
+        except Exception as e:
+            print(f"      ✗ Save failed: {e}")
+            return False
+        finally:
+            try:
+                workbook.Close(SaveChanges=False)
+            except:
+                pass
+            try:
+                excel.Quit()
+            except:
+                pass
     
+    print(f"\n✅ SUCCESS: {output_file}")
+    print(f"   Employees: {num_employees}")
+    print(f"   MNV range: {mnv_counter}-{mnv_counter + num_employees - 1}")
+    print(f"   bang luong: rows {bl_start_row}-{bl_start_row + num_employees - 1}")
+    print(f"   Data sheet: rows {data_start_row}-{data_start_row + num_employees - 1}")
+    print(f"   Emails: {', '.join(TEST_EMAILS)}")
     return True
-
-
-def generate_batch_test_file(source_file: Path, output_file: Path, num_employees: int = 200):
-    """Generate batch test file with employees."""
-    if not source_file.exists():
-        print(f"ERROR: Source file not found: {source_file}")
-        return False
-    
-    # Choose method based on availability
-    if HAS_OPENPYXL and str(source_file).endswith('.xlsx'):
-        success = generate_with_openpyxl(source_file, output_file, num_employees)
-    elif HAS_WIN32COM:
-        success = generate_with_win32com(source_file, output_file, num_employees)
-    else:
-        print("ERROR: No suitable library available for .xls files")
-        return False
-    
-    if success:
-        print(f"\n✅ SUCCESS: {output_file}")
-        print(f"   Employees: {num_employees}")
-        print(f"   MNV range: 6046073-{6046073 + num_employees - 1}")
-        print(f"   Emails: {', '.join(TEST_EMAILS)}")
-    
-    return success
 
 
 if __name__ == "__main__":
     excel_files_dir = Path(__file__).parent.parent.parent.parent / "excel-files"
     source_file = excel_files_dir / "TBKQ-phuclong.xls"
+    output_file = excel_files_dir / "TBKQ-phuclong-batch-200.xls"
     
-    # Check if .xlsx version exists (better for openpyxl)
-    source_xlsx = source_file.with_suffix('.xlsx')
-    if source_xlsx.exists():
-        source_file = source_xlsx
-        output_file = excel_files_dir / "TBKQ-phuclong-batch-200.xlsx"
-    else:
-        output_file = excel_files_dir / "TBKQ-phuclong-batch-200.xls"
-    
-    print("=" * 60)
+    print("=" * 80)
     print("BATCH TEST DATA GENERATOR")
-    print("=" * 60)
+    print("=" * 80)
     print(f"Source: {source_file}")
     print(f"Output: {output_file}")
-    print(f"Using: {'openpyxl' if HAS_OPENPYXL else 'Excel COM'}")
-    print("=" * 60)
+    print("=" * 80)
     
     success = generate_batch_test_file(source_file, output_file, num_employees=210)
     sys.exit(0 if success else 1)
-

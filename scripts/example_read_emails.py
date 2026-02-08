@@ -64,9 +64,9 @@ def main():
     logger = get_logger(__name__)
     
     # Log startup info
-    logger.info("=" * 60)
+    logger.info("=" * 80)
     logger.info("Office Automation Foundation - Example Script")
-    logger.info("=" * 60)
+    logger.info("=" * 80)
     logger.info(f"Account: {config.outlook_account}")
     logger.info(f"Dry-run mode: {config.dry_run}")
     logger.info(f"Batch size: {config.batch_size}")
@@ -168,9 +168,9 @@ def main():
             state_tracker.save()
             
             # Summary
-            logger.info("=" * 60)
+            logger.info("=" * 80)
             logger.info("Summary")
-            logger.info("=" * 60)
+            logger.info("=" * 80)
             logger.info(f"Total emails retrieved: {len(emails)}")
             logger.info(f"New emails processed: {new_emails}")
             logger.info(f"Skipped (already processed): {skipped_emails}")

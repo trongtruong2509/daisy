@@ -57,9 +57,9 @@ def main():
     
     logger = get_logger(__name__)
     
-    logger.info("=" * 60)
+    logger.info("=" * 80)
     logger.info("Office Automation Foundation - Send Example")
-    logger.info("=" * 60)
+    logger.info("=" * 80)
     logger.info(f"Sending account: {config.outlook_account}")
     logger.info(f"Dry-run mode: {config.dry_run}")
     
@@ -117,7 +117,7 @@ Automation System
                     logger.warning("Email was not sent (validation failed or duplicate)")
             
             # Show statistics
-            logger.info("=" * 60)
+            logger.info("=" * 80)
             logger.info(f"Session statistics:")
             logger.info(f"  Sent: {sender.sent_count}")
             logger.info(f"  Skipped: {sender.skipped_count}")

@@ -391,9 +391,9 @@ class OutlookSender:
                 actual_account = mail.SendUsingAccount.SmtpAddress
                 logger.info(f"[SEND-VERIFY] Mail item's SendUsingAccount = '{actual_account}'")
             else:
-                logger.warning(f"[SEND-VERIFY] Mail item's SendUsingAccount is None")
+                logger.debug(f"[SEND-VERIFY] Mail item's SendUsingAccount is None")
         except Exception as e:
-            logger.warning(f"[SEND-VERIFY] Could not verify SendUsingAccount: {e}")
+            logger.debug(f"[SEND-VERIFY] Could not verify SendUsingAccount: {e}")
         
         # Set content
         mail.Subject = email.subject

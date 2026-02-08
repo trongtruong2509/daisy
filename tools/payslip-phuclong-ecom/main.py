@@ -46,6 +46,7 @@ logger = get_logger(__name__)
 
 
 SENT_RESULT_FILE_PREFIX="01_sent_results_"
+RESET = "\033[0m"
 
 # ── Progress Utilities ──────────────────────────────────────────
 
@@ -62,13 +63,16 @@ def _progress_interval(total: int) -> int:
     return 50
 
 
+def print_with_color(text: str, color_code: int = 92):
+    """Print text with ANSI color codes."""
+    print(f"\033[{color_code}m{text}{RESET}")
+
 def print_banner():
     """Print tool banner."""
-    print("\n" + "=" * 60)
-    print("  Payslip Generator & Distributor - Phuc Long (Excel COM)")
-    print("  Powered by Daisy Platform")
-    print("=" * 60)
-
+    print_with_color("\n" + "=" * 80, 95)
+    print_with_color("  Payslip Generator & Distributor - Phuc Long (Excel COM)", 95)
+    print_with_color("  Powered by Daisy Platform", 95)
+    print_with_color("=" * 80, 95)
 
 def print_section(title: str):
     """Print a section header with separator."""
@@ -78,12 +82,11 @@ def print_section(title: str):
 
 def print_section_lite(title: str):
     """Print a lightweight section header."""
-    print(f"\n-- {title} --\n")
+    print_with_color(f"\n-- {title} --", 34)
 
 def print_with_color(text: str, color_code: int = 92):
     """Print text with ANSI color codes."""
     print(f"\033[{color_code}m{text}\033[0m")
-
 
 def print_pre_summary(config, employee_count: int):
     """Print pre-execution summary."""
@@ -107,32 +110,36 @@ def print_pre_summary(config, employee_count: int):
 
 def print_post_summary(stats: dict):
     """Print post-execution summary."""
-    print("\n" + "=" * 55)
-    print("  FINAL SUMMARY")
-    print("=" * 55)
-    print(f"  Total employees    : {stats.get('total', 0)}")
-    print(f"  Payslips generated : {stats.get('generated', 0)} (skipped: {stats.get('gen_skipped', 0)})")
-    print(f"  PDFs converted     : {stats.get('converted', 0)} (skipped: {stats.get('pdf_skipped', 0)})")
-    print(f"  Emails sent        : {stats.get('sent', 0)}")
-    print(f"  Emails skipped     : {stats.get('skipped', 0)}")
-    print(f"  Errors             : {stats.get('errors', 0)}")
+    print_with_color("\n" + "-" * 80, 32)
+    print_with_color("  FINAL SUMMARY", 32)
+    print_with_color("-" * 80, 32)
+    print_with_color(f"  Total employees    : {stats.get('total', 0)}", 32)
+    print_with_color(f"  Payslips generated : {stats.get('generated', 0)} (skipped: {stats.get('gen_skipped', 0)})", 32)
+    print_with_color(f"  PDFs converted     : {stats.get('converted', 0)} (skipped: {stats.get('pdf_skipped', 0)})", 32)
+    print_with_color(f"  Emails sent        : {stats.get('sent', 0)}", 32)
+    print_with_color(f"  Emails skipped     : {stats.get('skipped', 0)}", 32)
+    print_with_color(f"  Errors             : {stats.get('errors', 0)}", 32)
     elapsed = stats.get("elapsed", 0)
-    print(f"  Time elapsed       : {elapsed:.1f}s ({elapsed/60:.1f}m)")
+    print_with_color(f"  Time elapsed       : {elapsed:.1f}s ({elapsed/60:.1f}m)", 32)
     if stats.get("result_file"):
-        print(f"  Results file       : {stats['result_file']}")
-    print("=" * 55 + "\n")
+        print_with_color(f"  Results file       : {stats['result_file']}", 32)
+    print_with_color("-" * 80 + "\n", 32)
 
 
 def confirm_proceed() -> bool:
     """Ask user for confirmation before sending."""
     while True:
-        answer = input("Proceed with payslip generation and email sending? (yes/no): ").strip().lower()
+        answer = input(colored_prompt("Proceed with payslip generation and email sending? (yes/no): ", 35)).strip().lower()
         if answer in ("yes", "y"):
             return True
         if answer in ("no", "n"):
             return False
         print("Please enter 'yes' or 'no'.")
 
+def colored_prompt(text, color):
+    if sys.stdout.isatty():
+        return f"\033[{color}m{text}{RESET}"
+    return text
 
 # ── Result Writer ───────────────────────────────────────────────
 
@@ -239,9 +246,9 @@ def prompt_state_action(config, state_info: dict, total_employees: int) -> str:
     
     Returns: "yes", "no", or "new"
     """
-    print("\n" + "-" * 60)
-    print(f"  EXISTING PAYROLL FOR {config.date} DETECTED")
-    print("-" * 60)
+    print_with_color("\n" + "-" * 80, 33)
+    print_with_color(f"  EXISTING PAYROLL FOR {config.date} DETECTED", 33)
+    print_with_color("-" * 80, 33)
     print(f"  Total employees in data: {total_employees}")
     print(f"  Already processed: {state_info['sent_count']}")
     print(f"  Remaining: {total_employees - state_info['sent_count']}")
@@ -258,10 +265,10 @@ def prompt_state_action(config, state_info: dict, total_employees: int) -> str:
     print("    yes - Continue from last checkpoint (resume processing)")
     print("    no  - Exit the tool without making any changes")
     print(f"    new - Clean the existing state and start the payroll for {config.date} again")
-    print("-" * 60)
+    print_with_color("-" * 80, 33)
     
     while True:
-        answer = input("\nYour choice (yes/no/new): ").strip().lower()
+        answer = input(colored_prompt("\nYour choice (yes/no/new): ", 96)).strip().lower()
         if answer in ("yes", "y"):
             return "yes"
         elif answer in ("no", "n"):
@@ -439,7 +446,7 @@ def main():
 
     if not config.dry_run:
         if not confirm_proceed():
-            print("Aborted by user.")
+            print_with_color("Aborted by user.", 31)
             sys.exit(0)
     else:
         print("  [DRY-RUN MODE] Simulating — no emails will be sent\n")
