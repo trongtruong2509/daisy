@@ -48,6 +48,16 @@ logger = get_logger(__name__)
 SENT_RESULT_FILE_PREFIX="01_sent_results_"
 RESET = "\033[0m"
 
+# ── Console Output Style ────────────────────────────────────────
+# Colors
+PHASE = "\033[96m"    # Bright cyan for phase headers
+OK = "\033[92m"       # Bright green for success
+WARN = "\033[93m"     # Yellow for warnings
+ERROR = "\033[91m"    # Bright red for errors
+INFO = "\033[37m"     # White for info
+BOX = "\033[96m"      # Bright cyan for boxes
+RESET = "\033[0m"
+
 # ── Progress Utilities ──────────────────────────────────────────
 
 def _progress_interval(total: int) -> int:
@@ -69,37 +79,48 @@ def print_with_color(text: str, color_code: int = 92):
 
 def print_banner():
     """Print tool banner."""
-    print_with_color("\n" + "=" * 80, 95)
-    print_with_color("  Payslip Generator & Distributor - Phuc Long (Excel COM)", 95)
-    print_with_color("  Powered by Daisy Platform", 95)
-    print_with_color("=" * 80, 95)
+    print(f"\n{BOX}╔════════════════════════════════════════════════════════════════╗{RESET}")
+    print(f"{BOX}║  Payslip Generator & Distributor – Phuc Long                   ║{RESET}")
+    print(f"{BOX}║  Excel COM • Outlook • Daisy Platform                          ║{RESET}")
+    print(f"{BOX}╚════════════════════════════════════════════════════════════════╝{RESET}")
 
-def print_section(title: str):
-    """Print a section header with separator."""
-    print(f"\n{'─' * 55}")
-    print(f"  {title}")
-    print(f"{'─' * 55}")
+def print_phase(title: str):
+    """Print a phase header."""
+    print(f"\n{PHASE}▶  {title}{RESET}")
 
-def print_section_lite(title: str):
-    """Print a lightweight section header."""
-    print_with_color(f"\n-- {title} --", 34)
+def print_success(text: str, indent: int = 0):
+    """Print success message with checkmark."""
+    spaces = " " * indent
+    print(f"{spaces}{OK}✓ {text}{RESET}")
 
-def print_with_color(text: str, color_code: int = 92):
-    """Print text with ANSI color codes."""
-    print(f"\033[{color_code}m{text}\033[0m")
+def print_info(text: str, indent: int = 0):
+    """Print info message."""
+    spaces = " " * indent
+    print(f"{spaces}{text}")
+
+def print_error_msg(text: str, indent: int = 0):
+    """Print error message."""
+    spaces = " " * indent
+    print(f"{spaces}{ERROR}✗ {text}{RESET}")
+
+def print_warning_msg(text: str, indent: int = 0):
+    """Print warning message."""
+    spaces = " " * indent
+    print(f"{spaces}{WARN}⚠ {text}{RESET}")
 
 def print_pre_summary(config, employee_count: int):
     """Print pre-execution summary."""
-    print("\n--- Configuration Summary ---")
-    print(f"  Excel file         : {config.excel_path}")
-    print(f"  Payroll date       : {config.date}")
-    print(f"  Total employees    : {employee_count}")
-    print(f"  Outlook account    : {config.outlook_account}")
-    print(f"  Dry run            : {config.dry_run}")
-    print(f"  PDF password       : {'Enabled' if config.pdf_password_enabled else 'Disabled'}")
-    print(f"  Duplicate emails   : {'Allowed' if config.allow_duplicate_emails else 'Not allowed'}")
-    print(f"  Output directory   : {config.output_dir}")
-    print("-----------------------------\n")
+    print_phase("Configuration Summary")
+    print()
+    excel_short = config.excel_path.name if hasattr(config.excel_path, 'name') else str(config.excel_path).split('\\')[-1]
+    print(f"  Excel file       : {excel_short}")
+    print(f"  Payroll date     : {config.date}")
+    print(f"  Employees        : {employee_count}")
+    print(f"  Outlook account  : {config.outlook_account}")
+    print(f"  Dry run          : {'Yes' if config.dry_run else 'No'}")
+    print(f"  PDF password     : {'Enabled' if config.pdf_password_enabled else 'Disabled'}")
+    output_short = config.output_dir.name if hasattr(config.output_dir, 'name') else 'output/'
+    print(f"  Output directory : {output_short}")
     
     # Log to file for debugging account issues
     logger.info(f"=== CONFIGURATION ===")
@@ -110,36 +131,47 @@ def print_pre_summary(config, employee_count: int):
 
 def print_post_summary(stats: dict):
     """Print post-execution summary."""
-    print_with_color("\n" + "-" * 80, 32)
-    print_with_color("  FINAL SUMMARY", 32)
-    print_with_color("-" * 80, 32)
-    print_with_color(f"  Total employees    : {stats.get('total', 0)}", 32)
-    print_with_color(f"  Payslips generated : {stats.get('generated', 0)} (skipped: {stats.get('gen_skipped', 0)})", 32)
-    print_with_color(f"  PDFs converted     : {stats.get('converted', 0)} (skipped: {stats.get('pdf_skipped', 0)})", 32)
-    print_with_color(f"  Emails sent        : {stats.get('sent', 0)}", 32)
-    print_with_color(f"  Emails skipped     : {stats.get('skipped', 0)}", 32)
-    print_with_color(f"  Errors             : {stats.get('errors', 0)}", 32)
+    print(f"\n{OK}================================================================")
+    print(f"  FINAL SUMMARY                                                 ")
+    print(f"================================================================")
+    print()
+    print(f"  Employees           : {stats.get('total', 0)}")
+    gen_skipped = stats.get('gen_skipped', 0)
+    print(f"  Payslips generated  : {stats.get('generated', 0)}" + (f" (skipped: {gen_skipped})" if gen_skipped > 0 else ""))
+    pdf_skipped = stats.get('pdf_skipped', 0)
+    print(f"  PDFs converted      : {stats.get('converted', 0)}" + (f" (skipped: {pdf_skipped})" if pdf_skipped > 0 else ""))
+    print(f"  Emails sent         : {stats.get('sent', 0)}{RESET}")
+    errors = stats.get('errors', 0)
+    if errors > 0:
+        print(f"  {ERROR}Errors              : {errors}{RESET}")
+    else:
+        print(f"{OK}  Errors              : 0{RESET}")
+    print()
     elapsed = stats.get("elapsed", 0)
-    print_with_color(f"  Time elapsed       : {elapsed:.1f}s ({elapsed/60:.1f}m)", 32)
+    print(f"{OK}  Time elapsed        : {elapsed:.1f}s{RESET}")
     if stats.get("result_file"):
-        print_with_color(f"  Results file       : {stats['result_file']}", 32)
-    print_with_color("-" * 80 + "\n", 32)
+        result_short = stats['result_file'].name if hasattr(stats['result_file'], 'name') else str(stats['result_file']).split('\\')[-1]
+        print(f"{OK}  Results file        : {result_short}{RESET}")
+    print()
+    if errors == 0:
+        print(f"{OK}✔ Done{RESET}")
+    else:
+        print(f"{WARN}⚠ Done with errors{RESET}")
+    print()
 
 
 def confirm_proceed() -> bool:
     """Ask user for confirmation before sending."""
+    print_phase("Confirmation")
+    print()
     while True:
-        answer = input(colored_prompt("Proceed with payslip generation and email sending? (yes/no): ", 35)).strip().lower()
+        answer = input("  Proceed with payslip generation and email sending? (yes/no): ").strip().lower()
         if answer in ("yes", "y"):
             return True
         if answer in ("no", "n"):
             return False
-        print("Please enter 'yes' or 'no'.")
+        print("  Please enter 'yes' or 'no'.")
 
-def colored_prompt(text, color):
-    if sys.stdout.isatty():
-        return f"\033[{color}m{text}{RESET}"
-    return text
 
 # ── Result Writer ───────────────────────────────────────────────
 
@@ -246,43 +278,34 @@ def prompt_state_action(config, state_info: dict, total_employees: int) -> str:
     
     Returns: "yes", "no", or "new"
     """
-    print_with_color("\n" + "-" * 80, 33)
-    print_with_color(f"  EXISTING PAYROLL FOR {config.date} DETECTED", 33)
-    print_with_color("-" * 80, 33)
-    print(f"  Total employees in data: {total_employees}")
-    print(f"  Already processed: {state_info['sent_count']}")
-    print(f"  Remaining: {total_employees - state_info['sent_count']}")
-    
-    # if state_info["checkpoint_file"]:
-    #     print(f"  Checkpoint file: {state_info['checkpoint_file'].name}")
-    # if state_info["state_file"]:
-    #     print(f"  State file: {state_info['state_file'].name}")
-    # if state_info["result_file"]:
-    #     print(f"  Result file: {state_info['result_file'].name} ({state_info['total_in_results']} entries)")
-    
-    # print("\n")
-    print_with_color("\n  You should decide how to continue:", 96)
-    print("    yes - Continue from last checkpoint (resume processing)")
-    print("    no  - Exit the tool without making any changes")
-    print(f"    new - Clean the existing state and start the payroll for {config.date} again")
-    print_with_color("-" * 80, 33)
+    print()
+    print(f"{WARN}▶ Existing Payroll Detected{RESET}")
+    print()
+    print(f"  Payroll for {config.date} has partial state:")
+    print(f"    • Total employees    : {total_employees}")
+    print(f"    • Already processed  : {state_info['sent_count']}")
+    print(f"    • Remaining          : {total_employees - state_info['sent_count']}")
+    print()
+    print("  How to continue:")
+    print("    yes - Continue from last checkpoint (resume)")
+    print("    no  - Exit without changes")
+    print(f"    new - Clean state and start fresh")
     
     while True:
-        answer = input(colored_prompt("\nYour choice (yes/no/new): ", 96)).strip().lower()
+        answer = input(f"\n  Your choice (yes/no/new): ").strip().lower()
         if answer in ("yes", "y"):
             return "yes"
         elif answer in ("no", "n"):
             return "no"
         elif answer == "new":
             return "new"
-        print("Please enter 'yes', 'no', or 'new'.")
+        print("  Please enter 'yes', 'no', or 'new'.")
 
 
 def cleanup_output_files(config):
     """
     Delete all output files for the current payroll date.
     """
-    print("\n  Cleaning up output files...")
     files_deleted = []
     
     # # Delete result file
@@ -307,7 +330,6 @@ def cleanup_all_files(config):
     """
     Delete all state and output files for the current payroll date.
     """
-    print("\n  Cleaning up state files...")
     files_deleted = []
     
     # Delete checkpoint files
@@ -335,16 +357,17 @@ def main():
     print_banner()
 
     # ─── 1. Load Configuration ───
-    print_section_lite("Loading Configuration")
     tool_dir = Path(__file__).resolve().parent
     config = load_config(tool_dir=tool_dir)
 
     config_errors = config.validate()
     if config_errors:
-        print("\nConfiguration errors:")
+        print()
+        print_error_msg("Configuration errors:")
         for err in config_errors:
-            print(f"    ERROR: {err}")
-        print("\nPlease fix .env file and try again.")
+            print(f"      {err}")
+        print()
+        print("  Please fix .env file and try again.")
         sys.exit(1)
 
     config.ensure_directories()
@@ -357,10 +380,12 @@ def main():
     logger.info("Configuration loaded successfully")
     logger.info(f"Excel path: {config.excel_path}")
     logger.info(f"Date: {config.date}")
-    print("  Configuration loaded OK")
+    print_success("Configuration loaded")
 
     # ─── 2. Read Employee Metadata ───
-    print_section_lite("Reading Employee Data")
+    print_phase("Input & Validation")
+    print()
+    print_info("Reading employee data…")
     try:
         with ExcelReader(config.excel_path) as reader:
             employees = reader.read_employees(
@@ -389,7 +414,7 @@ def main():
 
     except Exception as e:
         logger.error(f"Failed to read Excel file: {e}")
-        print(f"\n  ERROR: Failed to read Excel file: {e}")
+        print_error_msg(f"Failed to read Excel file: {e}")
         sys.exit(1)
 
     # Allow ExcelReader's COM to fully release before generator starts
@@ -398,10 +423,10 @@ def main():
 
     if not employees:
         logger.error("No employee data found")
-        print("\n  ERROR: No employee data found in the Excel file.")
+        print_error_msg("No employee data found in the Excel file")
         sys.exit(1)
 
-    print(f"  Found {len(employees)} employees")
+    print_success(f"Found {len(employees)} employee" + ("s" if len(employees) != 1 else ""))
     logger.info(f"Found {len(employees)} employees")
 
     # ─── 2.5. Check for Existing State ───
@@ -409,16 +434,17 @@ def main():
     if state_info["has_state"]:
         action = prompt_state_action(config, state_info, len(employees))
         if action == "no":
-            print("\nExited by user. No changes made.")
+            print_info("Exited by user.")
             sys.exit(0)
         elif action == "new":
             cleanup_all_files(config)
-            print("  Starting fresh with clean state.\n")
+            print_info("Starting fresh with clean state.")
         else:  # action == "yes"
-            print("\n  Resuming from last checkpoint.\n")
+            print_info("Resuming from last checkpoint.")
 
     # ─── 3. Validate Data ───
-    print_section_lite("Validating Data")
+    print()
+    print_info("Validating data…")
     validator = DataValidator(
         employees,
         allow_duplicate_emails=config.allow_duplicate_emails,
@@ -426,36 +452,40 @@ def main():
     errors, warnings = validator.validate_all()
 
     if errors:
-        print(f"\n  Validation FAILED with {len(errors)} error(s):")
+        print()
+        print_error_msg(f"Validation FAILED with {len(errors)} error(s):")
         for err in errors:
-            print(f"    ERROR: {err}")
-        print("\n  Please fix the data and try again.")
+            print(f"      {err}")
+        print()
+        print("  Please fix the data and try again.")
         sys.exit(1)
 
     if warnings:
-        print(f"  {len(warnings)} warning(s) found (non-blocking)")
+        print_warning_msg(f"{len(warnings)} warning(s) found (non-blocking)")
         for w in warnings[:5]:
-            print(f"    WARNING: {w}")
+            print(f"      {w}")
         if len(warnings) > 5:
-            print(f"    ... and {len(warnings) - 5} more (see log file)")
+            print(f"      ... and {len(warnings) - 5} more (see log file)")
 
-    print(f"  Validation passed: {len(employees)} employees OK")
+    print_success("Validation passed")
 
     # ─── Pre-Execution Summary & Confirmation ───
     print_pre_summary(config, len(employees))
 
     if not config.dry_run:
         if not confirm_proceed():
-            print_with_color("Aborted by user.", 31)
+            print(f"\n{ERROR}Aborted by user.{RESET}")
             sys.exit(0)
     else:
-        print("  [DRY-RUN MODE] Simulating — no emails will be sent\n")
+        print_phase("Dry Run Mode")
+        print_info("Simulating — no emails will be sent\n")
 
     # Clean up output files for new session
+    print_info("Cleaning up output files…")
     cleanup_output_files(config)
 
     # ─── 4. Generate Payslip Excel Files via COM ───
-    print_section_lite("Generating Payslips")
+    print_phase("Generating payslips")
     generator = PayslipGenerator(
         output_dir=config.output_dir,
         date_str=config.date,
@@ -465,9 +495,9 @@ def main():
     interval = _progress_interval(len(employees))
 
     def gen_progress(current, total, name, skipped=False):
-        action = "Skipped (exists)" if skipped else "Generated"
+        action = "Skipped (exists)" if skipped else "✓"
         if current == 1 or current == total or current % interval == 0:
-            print(f"  [{current}/{total}] {action}: {name}")
+            print(f"  [{current}/{total}] {OK if not skipped else WARN}{action}{RESET} {name}")
 
     gen_start = time.time()
     try:
@@ -481,27 +511,28 @@ def main():
         )
     except Exception as e:
         logger.error(f"Payslip generation failed: {e}")
-        print(f"\n  ERROR: Payslip generation failed: {e}")
+        print_error_msg(f"Payslip generation failed: {e}")
         sys.exit(1)
 
     gen_elapsed = time.time() - gen_start
     generated = sum(1 for r in results if r["success"] and not r.get("skipped"))
     gen_skipped = sum(1 for r in results if r.get("skipped"))
     gen_failed = sum(1 for r in results if not r["success"])
-    print(f"\n  Result: Generated {generated}, Skipped {gen_skipped}, Failed {gen_failed} ({gen_elapsed:.1f}s)")
+    print()
+    print_info(f"Result: Generated {generated} | Skipped {gen_skipped} | Failed {gen_failed} ({gen_elapsed:.1f}s)")
 
     # Allow Excel COM to fully release before starting PDF converter
     gc.collect()
     time.sleep(2)
 
     # ─── 5. Convert to Password-Protected PDFs ───
-    print_section_lite("Converting to PDF")
+    print_phase("Converting to PDF")
     successful_items = [r for r in results if r["success"]]
 
     def pdf_progress(current, total, name, skipped=False):
-        action = "Skipped (exists)" if skipped else "Converted"
+        action = "Skipped (exists)" if skipped else "✓"
         if current == 1 or current == total or current % interval == 0:
-            print(f"  [{current}/{total}] {action}: {name}")
+            print(f"  [{current}/{total}] {OK if not skipped else WARN}{action}{RESET} {name}")
 
     pdf_start = time.time()
     try:
@@ -516,17 +547,18 @@ def main():
             )
     except Exception as e:
         logger.error(f"PDF conversion failed: {e}")
-        print(f"\n  ERROR: PDF conversion failed: {e}")
+        print_error_msg(f"PDF conversion failed: {e}")
 
     pdf_elapsed = time.time() - pdf_start
     converted = sum(1 for r in results if r.get("pdf_path"))
     pdf_skipped = sum(1 for r in results if r.get("pdf_skipped"))
     pdf_failed = len(successful_items) - converted
-    print(f"\n  Result: Converted {converted - pdf_skipped}, Skipped {pdf_skipped}, Failed {pdf_failed} ({pdf_elapsed:.1f}s)")
+    print()
+    print_info(f"Result: Converted {converted - pdf_skipped} | Skipped {pdf_skipped} | Failed {pdf_failed} ({pdf_elapsed:.1f}s)")
 
     # ─── 6. Compose and Send Emails ───
-    print_section_lite("Sending Emails")
-    print("  Composing emails...")
+    print_phase("Sending emails")
+    print_info("Composing emails…")
     composer = EmailComposer(
         template_cells=email_template,
         subject=subject,
@@ -535,7 +567,8 @@ def main():
     )
     results = composer.compose_batch(results)
     composed = sum(1 for r in results if r.get("email_data"))
-    print(f"  Composed {composed} emails")
+    print_info(f"Sending via Outlook…")
+    print()
 
     # Initialize MNV-based checkpoint tracker (for resume support)
     run_mode = "dryrun" if config.dry_run else "send"
@@ -558,9 +591,8 @@ def main():
 
     resumed_count = checkpoint.get_processed_count()
     if resumed_count > 0:
-        print(f"  Resuming: {resumed_count} employees already processed in previous run")
+        print_info(f"Resuming: {resumed_count} employees already processed")
 
-    print("  Sending emails via Outlook...")
     sent_count = 0
     skipped_count = 0
     error_count = 0
@@ -612,7 +644,7 @@ def main():
                         })
                         result_writer.append(mnv, name, email_addr, status)
                         if i == 1 or i == composed or i % interval == 0:
-                            print(f"  [{i}/{composed}] Sent: {name}")
+                            print(f"  [{i}/{composed}] {OK}✓{RESET} {name}")
                     else:
                         skipped_count += 1
                         checkpoint.mark_processed(mnv, metadata={
@@ -627,21 +659,22 @@ def main():
                     result_writer.append(mnv, name, email_addr, f"FAILED: {e}")
                     logger.error(f"[{i}/{composed}] Failed for {name}: {e}")
 
-            print(
-                f"\n  Sender stats - Sent: {sender.sent_count}, "
-                f"Skipped: {sender.skipped_count}, "
-                f"Errors: {sender.error_count}"
+            print()
+            print_info(
+                f"Sender stats: Sent {sender.sent_count} | "
+                f"Skipped {sender.skipped_count} | "
+                f"Errors {sender.error_count}"
             )
 
     except ImportError:
         logger.error("win32com not available - cannot send emails")
-        print("\n  ERROR: Outlook COM not available.")
+        print_error_msg("Outlook COM not available.")
         if config.dry_run:
-            print("  [DRY-RUN] Would have sent emails. Skipping Outlook.")
+            print_info("[DRY-RUN] Would have sent emails. Skipping Outlook.")
             sent_count = composed
     except Exception as e:
         logger.error(f"Email sending failed: {e}")
-        print(f"\n  ERROR: Email sending failed: {e}")
+        print_error_msg(f"Email sending failed: {e}")
 
     # ─── 7. Post-Execution Summary ───
     elapsed = time.time() - start_time
@@ -671,10 +704,9 @@ def main():
         pass
 
     if error_count > 0:
-        print(f"  WARNING: {error_count} error(s) occurred. Check logs for details.")
+        print(f"\n{WARN}⚠ WARNING: {error_count} error(s) occurred. Check logs for details.{RESET}")
         sys.exit(1)
 
-    print("  Done!")
     return 0
 
 

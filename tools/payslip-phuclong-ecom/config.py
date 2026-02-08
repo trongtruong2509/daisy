@@ -176,43 +176,43 @@ def _prompt_for_outlook_account() -> str:
     
     if not accounts:
         # Fallback: ask user to manually enter email
-        print("\nOutlook account email is required.")
+        print("\nOutlook account")
         validator = _validate_email_format
     else:
         # Show menu of available accounts
-        _print_with_color("\nOutlook account email is required. Choose your Outlook profile:", 33)
+        print("\nOutlook account")
         for i, account in enumerate(accounts, 1):
             print(f"  [{i}] {account}")
         
         # Prompt for selection
         while True:
             try:
-                choice = input("\nYour account (enter number): ").strip()
+                choice = input("  → Selected: ").strip()
                 if not choice:
-                    print("Selection cannot be empty. Please try again.")
+                    print("  Selection cannot be empty. Please try again.")
                     continue
                 
                 choice_num = int(choice)
                 if 1 <= choice_num <= len(accounts):
                     return accounts[choice_num - 1]
                 else:
-                    print(f"Invalid selection. Please enter a number between 1 and {len(accounts)}")
+                    print(f"  \033[91m✗ Invalid selection. Please enter 1-{len(accounts)}\033[0m")
                     continue
                     
             except ValueError:
-                print("Please enter a valid number.")
+                print("  \033[91m✗ Please enter a valid number.\033[0m")
                 continue
     
     # Manual entry fallback
     while True:
-        value = input("\nOUTLOOK_ACCOUNT: ").strip()
+        value = input("  → ").strip()
         if not value:
-            print("Value cannot be empty. Please try again.")
+            print("  Value cannot be empty. Please try again.")
             continue
         
         is_valid, error_msg = _validate_email_format(value)
         if not is_valid:
-            print(f"❌ Invalid input: {error_msg}")
+            print(f"  \033[91m✗ Invalid input: {error_msg}\033[0m")
             continue
         
         return value
@@ -388,6 +388,17 @@ def load_config(
 
     # Prompt for missing critical values
     local_env = tool_dir / ".env"
+    
+    # Check if any prompts are needed
+    needs_prompt = (
+        (not config.excel_path or not config.excel_path.exists()) or
+        not config.date or
+        not config.outlook_account
+    )
+    
+    if needs_prompt:
+        print("\n\033[96m▶  Configuration\033[0m")
+        print()
 
     if not config.excel_path or not config.excel_path.exists():
         excel_path_str = _prompt_for_value(
@@ -405,8 +416,8 @@ def load_config(
     if not config.date:
         date_str = _prompt_for_value(
             "DATE",
-            "Payroll date (MM/YYYY) is required.",
-            "01/2026",
+            "Payroll date (MM/YYYY)",
+            "Example: 01/2026",
             validator=_validate_date_format
         )
         config.date = date_str
