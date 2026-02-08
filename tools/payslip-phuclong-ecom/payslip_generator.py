@@ -62,6 +62,19 @@ class PayslipGenerator:
         self.year = parts[1] if len(parts) >= 2 else ""
         self.mmyyyy = self.month + self.year
 
+    def _build_output_path(self, employee: Dict[str, Any]) -> Path:
+        """Build the expected output file path for an employee's payslip."""
+        name = employee.get("name", "")
+        mnv = employee.get("mnv", "")
+        safe_name = re.sub(r'[\\/*?:"<>|]', "_", name) if name else mnv
+        filename = (
+            self.filename_pattern
+            .replace("{name}", safe_name)
+            .replace("{mmyyyy}", self.mmyyyy)
+            + ".xlsx"
+        )
+        return self.output_dir / filename
+
     def generate_batch(
         self,
         employees: List[Dict[str, Any]],
@@ -69,6 +82,7 @@ class PayslipGenerator:
         template_sheet: str = "TBKQ",
         data_sheet: str = "Data",
         col_mnv: str = "A",
+        progress_callback=None,
     ) -> List[Dict[str, Any]]:
         """
         Generate payslips by replicating the VBA macro approach.
@@ -93,6 +107,26 @@ class PayslipGenerator:
         results = []
         total = len(employees)
 
+        # Resume optimization: skip Excel COM entirely if all files exist
+        needs_generation = any(
+            not self._build_output_path(emp).exists()
+            and not self._build_output_path(emp).with_suffix(".pdf").exists()
+            for emp in employees
+        )
+        if not needs_generation:
+            logger.info("All payslips already exist, skipping Excel COM")
+            for i, emp in enumerate(employees, 1):
+                output_path = self._build_output_path(emp)
+                results.append({
+                    "employee": emp,
+                    "xlsx_path": output_path if output_path.exists() else None,
+                    "success": True,
+                    "skipped": True,
+                })
+                if progress_callback:
+                    progress_callback(i, total, emp.get("name", ""), skipped=True)
+            return results
+
         excel = win32.Dispatch("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
@@ -112,6 +146,20 @@ class PayslipGenerator:
                 mnv = emp.get("mnv", "")
                 name = emp.get("name", "")
 
+                # Resume support: skip if output already exists
+                output_path = self._build_output_path(emp)
+                if output_path.exists() or output_path.with_suffix(".pdf").exists():
+                    logger.debug(f"[{i}/{total}] Skipping {name} - output already exists")
+                    results.append({
+                        "employee": emp,
+                        "xlsx_path": output_path if output_path.exists() else None,
+                        "success": True,
+                        "skipped": True,
+                    })
+                    if progress_callback:
+                        progress_callback(i, total, name, skipped=True)
+                    continue
+
                 logger.info(
                     f"[{i}/{total}] Generating payslip for {name} (MNV: {mnv})"
                 )
@@ -124,14 +172,20 @@ class PayslipGenerator:
                         "employee": emp,
                         "xlsx_path": xlsx_path,
                         "success": xlsx_path is not None,
+                        "skipped": False,
                     })
+                    if progress_callback:
+                        progress_callback(i, total, name, skipped=False)
                 except Exception as e:
                     logger.error(f"Failed to generate payslip for {name}: {e}")
                     results.append({
                         "employee": emp,
                         "xlsx_path": None,
                         "success": False,
+                        "skipped": False,
                     })
+                    if progress_callback:
+                        progress_callback(i, total, name, skipped=False)
 
             wb.Close(SaveChanges=False)
         finally:
@@ -175,14 +229,7 @@ class PayslipGenerator:
         row = employee.get("row", 0)
 
         # Build output filename
-        safe_name = re.sub(r'[\\/*?:"<>|]', "_", name) if name else mnv
-        filename = (
-            self.filename_pattern
-            .replace("{name}", safe_name)
-            .replace("{mmyyyy}", self.mmyyyy)
-            + ".xlsx"
-        )
-        output_path = self.output_dir / filename
+        output_path = self._build_output_path(employee)
 
         # Step 1: Set TBKQ!B3 = MNV from Data sheet
         data_ws = source_wb.Sheets(data_sheet)

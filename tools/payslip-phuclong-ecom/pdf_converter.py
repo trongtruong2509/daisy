@@ -187,12 +187,13 @@ class PdfConverter:
                 protected_path.unlink()
             return None
 
-    def convert_batch(self, items: List[dict]) -> List[dict]:
+    def convert_batch(self, items: List[dict], progress_callback=None) -> List[dict]:
         """
         Batch convert payslip files to PDF.
 
         Args:
             items: List of dicts with 'xlsx_path', 'employee' keys.
+            progress_callback: Optional callback(current, total, name, skipped).
 
         Returns:
             Updated list with 'pdf_path' added to each dict.
@@ -200,6 +201,7 @@ class PdfConverter:
         total = len(items)
         success = 0
         failed = 0
+        skipped = 0
 
         for i, item in enumerate(items, 1):
             xlsx_path = item.get("xlsx_path")
@@ -207,10 +209,29 @@ class PdfConverter:
             name = emp.get("name", "N/A")
             password = emp.get("password", "")
 
+            # Determine expected PDF path for existence check
+            if xlsx_path:
+                pdf_filename = Path(xlsx_path).with_suffix(".pdf").name
+                expected_pdf = self.output_dir / pdf_filename
+
+                # Resume support: skip if PDF already exists
+                if expected_pdf.exists():
+                    logger.debug(f"[{i}/{total}] Skipping {name} - PDF already exists")
+                    item["pdf_path"] = expected_pdf
+                    item["pdf_skipped"] = True
+                    success += 1
+                    skipped += 1
+                    if progress_callback:
+                        progress_callback(i, total, name, skipped=True)
+                    continue
+
             if not xlsx_path or not Path(xlsx_path).exists():
                 logger.warning(f"[{i}/{total}] Skipping {name}: no xlsx file")
                 item["pdf_path"] = None
+                item["pdf_skipped"] = False
                 failed += 1
+                if progress_callback:
+                    progress_callback(i, total, name, skipped=False)
                 continue
 
             logger.info(f"[{i}/{total}] Converting PDF for {name}")
@@ -223,10 +244,17 @@ class PdfConverter:
             )
 
             item["pdf_path"] = pdf_path
+            item["pdf_skipped"] = False
             if pdf_path:
                 success += 1
             else:
                 failed += 1
 
-        logger.info(f"PDF conversion complete: {success} success, {failed} failed")
+            if progress_callback:
+                progress_callback(i, total, name, skipped=False)
+
+        logger.info(
+            f"PDF conversion complete: {success} success "
+            f"({skipped} skipped), {failed} failed"
+        )
         return items

@@ -61,19 +61,48 @@ class EmailComposer:
             )
 
     def compose_html_body(self) -> str:
-        """Build HTML email body from template cells matching VBA format."""
-        parts = []
-        for cell in self.template_cells:
-            value = self.template_cells.get(cell, "").strip()
-            if not value:
-                parts.append("")
-                continue
-            if cell == "A5":
-                parts.append(f"<strong>{value}</strong>")
-            else:
-                parts.append(value)
+        """Build HTML email body from template cells with proper paragraph spacing.
 
-        return "<br />".join(parts)
+        Uses row gaps between cells to determine paragraph spacing:
+        - Consecutive rows (gap=1): single line break <br />
+        - Skipped rows (gap>1): double line break <br /><br /> for paragraph spacing
+        """
+        import re as _re
+
+        def _cell_row(cell_ref: str) -> int:
+            """Extract row number from cell reference like 'A5' -> 5."""
+            match = _re.match(r"[A-Z]+(\d+)", cell_ref, _re.IGNORECASE)
+            return int(match.group(1)) if match else 0
+
+        # Sort cells by row number to maintain correct order
+        sorted_cells = sorted(self.template_cells.keys(), key=_cell_row)
+        if not sorted_cells:
+            return ""
+
+        html_parts = []
+        prev_row = None
+
+        for cell in sorted_cells:
+            value = self.template_cells.get(cell, "").strip()
+            row_num = _cell_row(cell)
+
+            # Add paragraph spacing for row gaps > 1
+            if prev_row is not None and row_num - prev_row > 1:
+                html_parts.append("")  # Creates <br /><br /> when joined
+
+            if not value:
+                prev_row = row_num
+                continue
+
+            # Apply bold formatting for password hint cell
+            if cell.upper() == "A5":
+                html_parts.append(f"<strong>{value}</strong>")
+            else:
+                html_parts.append(value)
+
+            prev_row = row_num
+
+        return "<br />".join(html_parts)
 
     def compose_email(
         self,

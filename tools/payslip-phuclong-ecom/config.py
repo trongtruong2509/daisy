@@ -70,6 +70,7 @@ class PayslipConfig:
     # Processing options
     dry_run: bool = True
     batch_size: int = 50
+    allow_duplicate_emails: bool = False
 
     # PDF options
     pdf_password_enabled: bool = True
@@ -186,6 +187,7 @@ def load_config(
         outlook_account=os.getenv("OUTLOOK_ACCOUNT", ""),
         dry_run=_str_to_bool(os.getenv("DRY_RUN", "true")),
         batch_size=int(os.getenv("BATCH_SIZE", "50")),
+        allow_duplicate_emails=_str_to_bool(os.getenv("ALLOW_DUPLICATE_EMAILS", "false")),
         pdf_password_enabled=_str_to_bool(os.getenv("PDF_PASSWORD_ENABLED", "true")),
         pdf_password_strip_zeros=_str_to_bool(
             os.getenv("PDF_PASSWORD_STRIP_LEADING_ZEROS", "true")

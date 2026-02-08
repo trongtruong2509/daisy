@@ -40,8 +40,9 @@ class DataValidator:
     - Empty/missing data detection
     """
 
-    def __init__(self, employees: List[Dict[str, Any]]):
+    def __init__(self, employees: List[Dict[str, Any]], allow_duplicate_emails: bool = False):
         self.employees = employees
+        self.allow_duplicate_emails = allow_duplicate_emails
         self.errors: List[ValidationError] = []
         self.warnings: List[ValidationError] = []
 
@@ -112,12 +113,20 @@ class DataValidator:
                     for emp in self.employees
                     if emp.get("email", "").lower() == email
                 ]
-                self.errors.append(
-                    ValidationError(
-                        rows[0], "Email",
-                        f"Duplicate email '{email}' found in rows: {rows}",
+                if self.allow_duplicate_emails:
+                    self.warnings.append(
+                        ValidationError(
+                            rows[0], "Email",
+                            f"Duplicate email '{email}' in rows: {rows} (allowed by config)",
+                        )
                     )
-                )
+                else:
+                    self.errors.append(
+                        ValidationError(
+                            rows[0], "Email",
+                            f"Duplicate email '{email}' found in rows: {rows}",
+                        )
+                    )
 
     def _validate_passwords(self):
         """Check that passwords are present."""
