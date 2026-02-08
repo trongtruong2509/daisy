@@ -9,8 +9,12 @@ pywin32>=306          # Windows COM automation (required for Outlook)
 python-dotenv>=1.0.0  # Environment variable loading
 
 # Data processing
-openpyxl>=3.1.2       # Excel file handling
+openpyxl>=3.1.2       # Excel file handling (.xlsx read/write)
+xlrd>=2.0.1           # Excel file handling (.xls read)
 pandas>=2.0.0         # Data manipulation (optional but recommended)
+
+# PDF
+pikepdf>=8.0.0        # PDF password protection
 
 # Parsing
 beautifulsoup4>=4.12.0  # HTML parsing
