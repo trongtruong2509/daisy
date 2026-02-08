@@ -12,9 +12,9 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 
 def _str_to_bool(value: str) -> bool:
@@ -29,6 +29,187 @@ def _parse_cell_list(value: str) -> List[str]:
     if not value:
         return []
     return [c.strip() for c in value.split(",") if c.strip()]
+
+
+def _prompt_for_value(
+    key: str,
+    description: str,
+    example: str = "",
+    validator=None,
+) -> str:
+    """
+    Prompt user for a configuration value with optional validation.
+    
+    Args:
+        key: Config key name
+        description: User-facing description
+        example: Example value to show
+        validator: Optional callable(value) -> (is_valid: bool, error_msg: str)
+                  Returns tuple of (is_valid, error_message)
+    """
+    print(f"\n{description}")
+    if example:
+        print(f"Example: {example}")
+    while True:
+        value = input(f"{key}: ").strip()
+        if not value:
+            print("Value cannot be empty. Please try again.")
+            continue
+        
+        # Validate if validator provided
+        if validator:
+            is_valid, error_msg = validator(value)
+            if not is_valid:
+                print(f"❌ Invalid input: {error_msg}")
+                continue
+        
+        return value
+
+
+def _save_to_env(env_file: Path, key: str, value: str) -> None:
+    """Save a key-value pair to .env file."""
+    try:
+        set_key(str(env_file), key, value)
+        print(f"  Saved {key} to .env file")
+    except Exception as e:
+        print(f"  Warning: Could not save to .env: {e}")
+
+
+# ── Validation Functions ────────────────────────────────────
+
+def _validate_date_format(value: str) -> tuple:
+    """Validate DATE format (MM/YYYY with valid month 1-12)."""
+    if not re.match(r"^\d{2}/\d{4}$", value):
+        return False, "Expected format: MM/YYYY (e.g., 01/2026)"
+    
+    try:
+        month = int(value[:2])
+        if month < 1 or month > 12:
+            return False, f"Month must be 01-12, got {month}"
+    except ValueError:
+        return False, "Invalid month value"
+    
+    return True, ""
+
+
+def _validate_email_format(value: str) -> tuple:
+    """Validate email format."""
+    email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    if not re.match(email_pattern, value):
+        return False, "Invalid email format (e.g., user@company.com)"
+    return True, ""
+
+
+def _validate_file_path(value: str, tool_dir: Path) -> tuple:
+    """Validate file path exists."""
+    file_path = Path(value)
+    
+    # Make relative paths relative to tool_dir
+    if not file_path.is_absolute():
+        file_path = tool_dir / file_path
+    
+    if not file_path.exists():
+        return False, f"File not found: {file_path}"
+    
+    if not file_path.is_file():
+        return False, f"Path is not a file: {file_path}"
+    
+    return True, ""
+
+
+# ── Outlook Account Functions ───────────────────────────────
+
+def _get_outlook_accounts() -> List[str]:
+    """
+    Get list of configured accounts from Outlook COM.
+    
+    Returns:
+        List of email addresses, or empty list if Outlook not available.
+    """
+    accounts = []
+    try:
+        import win32com.client
+        
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        ns = outlook.GetNamespace("MAPI")
+        
+        # Iterate accounts using indexed access (same as sender.py)
+        # to ensure consistent ordering
+        for i in range(1, ns.Accounts.Count + 1):
+            account = ns.Accounts.Item(i)
+            email = getattr(account, "SmtpAddress", "")
+            if email:
+                accounts.append(email)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_accounts = []
+        for email in accounts:
+            if email not in seen:
+                unique_accounts.append(email)
+                seen.add(email)
+        
+        return unique_accounts
+    
+    except Exception as e:
+        # Outlook not available or error occurred
+        print(f"  Note: Could not retrieve Outlook accounts: {e}")
+        return []
+
+
+def _prompt_for_outlook_account() -> str:
+    """
+    Prompt user to select Outlook account from configured profiles.
+    
+    If no accounts found, falls back to manual email entry.
+    
+    Returns:
+        Selected or entered email address.
+    """
+    accounts = _get_outlook_accounts()
+    
+    if not accounts:
+        # Fallback: ask user to manually enter email
+        print("\nOutlook account email is required.")
+        validator = _validate_email_format
+    else:
+        # Show menu of available accounts
+        print("\nOutlook account email is required. Choose your Outlook profile:")
+        for i, account in enumerate(accounts, 1):
+            print(f"  [{i}] {account}")
+        
+        # Prompt for selection
+        while True:
+            try:
+                choice = input("\nYour account (enter number): ").strip()
+                if not choice:
+                    print("Selection cannot be empty. Please try again.")
+                    continue
+                
+                choice_num = int(choice)
+                if 1 <= choice_num <= len(accounts):
+                    return accounts[choice_num - 1]
+                else:
+                    print(f"Invalid selection. Please enter a number between 1 and {len(accounts)}")
+                    continue
+                    
+            except ValueError:
+                print("Please enter a valid number.")
+                continue
+    
+    # Manual entry fallback
+    while True:
+        value = input("\nOUTLOOK_ACCOUNT: ").strip()
+        if not value:
+            print("Value cannot be empty. Please try again.")
+            continue
+        
+        is_valid, error_msg = _validate_email_format(value)
+        if not is_valid:
+            print(f"❌ Invalid input: {error_msg}")
+            continue
+        
+        return value
 
 
 @dataclass
@@ -198,5 +379,36 @@ def load_config(
         state_dir=tool_dir / Path(os.getenv("STATE_DIR", "./state")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
     )
+
+    # Prompt for missing critical values
+    local_env = tool_dir / ".env"
+
+    if not config.excel_path or not config.excel_path.exists():
+        excel_path_str = _prompt_for_value(
+            "PAYSLIP_EXCEL_PATH",
+            "Excel file path not found or invalid.",
+            "../../excel-files/TBKQ-phuclong.xls",
+            validator=lambda v: _validate_file_path(v, tool_dir)
+        )
+        excel_path = Path(excel_path_str)
+        if not excel_path.is_absolute():
+            excel_path = tool_dir / excel_path
+        config.excel_path = excel_path
+        # _save_to_env(local_env, "PAYSLIP_EXCEL_PATH", excel_path_str)
+
+    if not config.date:
+        date_str = _prompt_for_value(
+            "DATE",
+            "Payroll date (MM/YYYY) is required.",
+            "01/2026",
+            validator=_validate_date_format
+        )
+        config.date = date_str
+        # _save_to_env(local_env, "DATE", date_str)
+
+    if not config.outlook_account:
+        outlook_account = _prompt_for_outlook_account()
+        config.outlook_account = outlook_account
+        # _save_to_env(local_env, "OUTLOOK_ACCOUNT", outlook_account)
 
     return config

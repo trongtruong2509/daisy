@@ -45,6 +45,8 @@ from email_composer import EmailComposer
 logger = get_logger(__name__)
 
 
+SENT_RESULT_FILE_PREFIX="01_sent_results_"
+
 # ── Progress Utilities ──────────────────────────────────────────
 
 def _progress_interval(total: int) -> int:
@@ -64,7 +66,7 @@ def print_banner():
     """Print tool banner."""
     print("\n" + "=" * 60)
     print("  Payslip Generator & Distributor - Phuc Long (Excel COM)")
-    print("  Powered by Daisy Foundation")
+    print("  Powered by Daisy Platform")
     print("=" * 60)
 
 
@@ -73,6 +75,14 @@ def print_section(title: str):
     print(f"\n{'─' * 55}")
     print(f"  {title}")
     print(f"{'─' * 55}")
+
+def print_section_lite(title: str):
+    """Print a lightweight section header."""
+    print(f"\n-- {title} --\n")
+
+def print_with_color(text: str, color_code: int = 92):
+    """Print text with ANSI color codes."""
+    print(f"\033[{color_code}m{text}\033[0m")
 
 
 def print_pre_summary(config, employee_count: int):
@@ -87,6 +97,12 @@ def print_pre_summary(config, employee_count: int):
     print(f"  Duplicate emails   : {'Allowed' if config.allow_duplicate_emails else 'Not allowed'}")
     print(f"  Output directory   : {config.output_dir}")
     print("-----------------------------\n")
+    
+    # Log to file for debugging account issues
+    logger.info(f"=== CONFIGURATION ===")
+    logger.info(f"Outlook account: {config.outlook_account}")
+    logger.info(f"Dry run: {config.dry_run}")
+    logger.info(f"Total employees: {employee_count}")
 
 
 def print_post_summary(stats: dict):
@@ -144,6 +160,165 @@ class ResultWriter:
             f.write(f"{mnv} | {name} | {email} | {status} | {ts}\n")
 
 
+# ── State Analysis & Cleanup ────────────────────────────────────
+
+def analyze_existing_state(config) -> dict:
+    """
+    Analyze existing state files for the current payroll date.
+    
+    Returns dict with:
+    - has_state: bool
+    - checkpoint_file: Path or None
+    - state_file: Path or None
+    - result_file: Path or None
+    - sent_count: int
+    - total_in_results: int
+    """
+    result = {
+        "has_state": False,
+        "checkpoint_file": None,
+        "state_file": None,
+        "result_file": None,
+        "sent_count": 0,
+        "total_in_results": 0,
+    }
+    
+    # Check checkpoint files (both dry-run and production)
+    checkpoint_dryrun = config.state_dir / f"payslip_checkpoint_dryrun_{config.date_mmyyyy}_state.json"
+    checkpoint_send = config.state_dir / f"payslip_checkpoint_send_{config.date_mmyyyy}_state.json"
+    state_file = config.state_dir / f"payslip_send_{config.date_mmyyyy}_state.json"
+    result_file = config.output_dir / f"{SENT_RESULT_FILE_PREFIX}{config.date_mmyyyy}.txt"
+    
+    if checkpoint_dryrun.exists():
+        result["checkpoint_file"] = checkpoint_dryrun
+        result["has_state"] = True
+        try:
+            import json
+            with open(checkpoint_dryrun, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                result["sent_count"] += data.get("total_processed", 0)
+        except Exception:
+            pass
+    
+    if checkpoint_send.exists():
+        result["checkpoint_file"] = checkpoint_send
+        result["has_state"] = True
+        try:
+            import json
+            with open(checkpoint_send, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                result["sent_count"] += data.get("total_processed", 0)
+        except Exception:
+            pass
+    
+    if state_file.exists():
+        result["state_file"] = state_file
+        result["has_state"] = True
+    
+    if result_file.exists():
+        result["result_file"] = result_file
+        result["has_state"] = True
+        try:
+            with open(result_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                # Count non-comment lines
+                result["total_in_results"] = sum(
+                    1 for line in lines 
+                    if line.strip() and not line.strip().startswith("#") 
+                    and not line.strip().startswith("─")
+                )
+        except Exception:
+            pass
+    
+    return result
+
+
+def prompt_state_action(config, state_info: dict, total_employees: int) -> str:
+    """
+    Prompt user for action when existing state is found.
+    
+    Returns: "yes", "no", or "new"
+    """
+    print("\n" + "-" * 60)
+    print(f"  EXISTING PAYROLL FOR {config.date} DETECTED")
+    print("-" * 60)
+    print(f"  Total employees in data: {total_employees}")
+    print(f"  Already processed: {state_info['sent_count']}")
+    print(f"  Remaining: {total_employees - state_info['sent_count']}")
+    
+    # if state_info["checkpoint_file"]:
+    #     print(f"  Checkpoint file: {state_info['checkpoint_file'].name}")
+    # if state_info["state_file"]:
+    #     print(f"  State file: {state_info['state_file'].name}")
+    # if state_info["result_file"]:
+    #     print(f"  Result file: {state_info['result_file'].name} ({state_info['total_in_results']} entries)")
+    
+    # print("\n")
+    print_with_color("\n  You should decide how to continue:", 96)
+    print("    yes - Continue from last checkpoint (resume processing)")
+    print("    no  - Exit the tool without making any changes")
+    print(f"    new - Clean the existing state and start the payroll for {config.date} again")
+    print("-" * 60)
+    
+    while True:
+        answer = input("\nYour choice (yes/no/new): ").strip().lower()
+        if answer in ("yes", "y"):
+            return "yes"
+        elif answer in ("no", "n"):
+            return "no"
+        elif answer == "new":
+            return "new"
+        print("Please enter 'yes', 'no', or 'new'.")
+
+
+def cleanup_output_files(config):
+    """
+    Delete all output files for the current payroll date.
+    """
+    print("\n  Cleaning up output files...")
+    files_deleted = []
+    
+    # # Delete result file
+    # result_file = config.output_dir / f"{SENT_RESULT_FILE_PREFIX}{config.date_mmyyyy}.txt"
+    # if result_file.exists():
+    #     result_file.unlink()
+    #     files_deleted.append(result_file.name)
+    
+    # Delete output PDF, TXT, and CSV files
+    if config.output_dir.exists():
+        patterns = ("*.pdf", "*.txt", "*.csv")
+
+        for pattern in patterns:
+            for file in config.output_dir.glob(pattern):
+                if file.is_file():
+                    file.unlink()
+                    files_deleted.append(file.name)
+
+    
+
+def cleanup_all_files(config):
+    """
+    Delete all state and output files for the current payroll date.
+    """
+    print("\n  Cleaning up state files...")
+    files_deleted = []
+    
+    # Delete checkpoint files
+    for mode in ["dryrun", "send"]:
+        checkpoint = config.state_dir / f"payslip_checkpoint_{mode}_{config.date_mmyyyy}_state.json"
+        if checkpoint.exists():
+            checkpoint.unlink()
+            files_deleted.append(checkpoint.name)
+    
+    # Delete state file
+    state_file = config.state_dir / f"payslip_send_{config.date_mmyyyy}_state.json"
+    if state_file.exists():
+        state_file.unlink()
+        files_deleted.append(state_file.name)
+    
+    cleanup_output_files(config)
+
+
 def main():
     """Main entry point."""
     import pythoncom
@@ -153,16 +328,16 @@ def main():
     print_banner()
 
     # ─── 1. Load Configuration ───
-    print_section("Phase 1: Loading Configuration")
+    print_section_lite("Loading Configuration")
     tool_dir = Path(__file__).resolve().parent
     config = load_config(tool_dir=tool_dir)
 
     config_errors = config.validate()
     if config_errors:
-        print("\n  Configuration errors:")
+        print("\nConfiguration errors:")
         for err in config_errors:
             print(f"    ERROR: {err}")
-        print("\n  Please fix .env file and try again.")
+        print("\nPlease fix .env file and try again.")
         sys.exit(1)
 
     config.ensure_directories()
@@ -178,7 +353,7 @@ def main():
     print("  Configuration loaded OK")
 
     # ─── 2. Read Employee Metadata ───
-    print_section("Phase 2: Reading Employee Data")
+    print_section_lite("Reading Employee Data")
     try:
         with ExcelReader(config.excel_path) as reader:
             employees = reader.read_employees(
@@ -222,8 +397,21 @@ def main():
     print(f"  Found {len(employees)} employees")
     logger.info(f"Found {len(employees)} employees")
 
+    # ─── 2.5. Check for Existing State ───
+    state_info = analyze_existing_state(config)
+    if state_info["has_state"]:
+        action = prompt_state_action(config, state_info, len(employees))
+        if action == "no":
+            print("\nExited by user. No changes made.")
+            sys.exit(0)
+        elif action == "new":
+            cleanup_all_files(config)
+            print("  Starting fresh with clean state.\n")
+        else:  # action == "yes"
+            print("\n  Resuming from last checkpoint.\n")
+
     # ─── 3. Validate Data ───
-    print_section("Phase 3: Validating Data")
+    print_section_lite("Validating Data")
     validator = DataValidator(
         employees,
         allow_duplicate_emails=config.allow_duplicate_emails,
@@ -256,8 +444,11 @@ def main():
     else:
         print("  [DRY-RUN MODE] Simulating — no emails will be sent\n")
 
+    # Clean up output files for new session
+    cleanup_output_files(config)
+
     # ─── 4. Generate Payslip Excel Files via COM ───
-    print_section("Phase 4: Generating Payslips")
+    print_section_lite("Generating Payslips")
     generator = PayslipGenerator(
         output_dir=config.output_dir,
         date_str=config.date,
@@ -297,7 +488,7 @@ def main():
     time.sleep(2)
 
     # ─── 5. Convert to Password-Protected PDFs ───
-    print_section("Phase 5: Converting to PDF")
+    print_section_lite("Converting to PDF")
     successful_items = [r for r in results if r["success"]]
 
     def pdf_progress(current, total, name, skipped=False):
@@ -327,7 +518,7 @@ def main():
     print(f"\n  Result: Converted {converted - pdf_skipped}, Skipped {pdf_skipped}, Failed {pdf_failed} ({pdf_elapsed:.1f}s)")
 
     # ─── 6. Compose and Send Emails ───
-    print_section("Phase 6: Sending Emails")
+    print_section_lite("Sending Emails")
     print("  Composing emails...")
     composer = EmailComposer(
         template_cells=email_template,
@@ -355,7 +546,7 @@ def main():
     )
 
     # Initialize result writer
-    result_file = config.output_dir / f"sent_results_{config.date_mmyyyy}.txt"
+    result_file = config.output_dir / f"{SENT_RESULT_FILE_PREFIX}{config.date_mmyyyy}.txt"
     result_writer = ResultWriter(result_file, config.date)
 
     resumed_count = checkpoint.get_processed_count()

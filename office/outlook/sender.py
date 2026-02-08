@@ -158,7 +158,8 @@ class OutlookSender:
         if self._connected:
             return
         
-        logger.debug("Connecting to Outlook for sending...")
+        logger.info(f"[ACCOUNT-LOOKUP] Looking for account: {self.account}")
+        logger.debug("Connecting to Outlook...")
         
         try:
             # Initialize COM for this thread
@@ -174,9 +175,10 @@ class OutlookSender:
         
         # Find the account
         self._account_obj = self._find_account()
+        found_smtp = getattr(self._account_obj, "SmtpAddress", "UNKNOWN")
         self._connected = True
         
-        logger.info(f"Connected to Outlook for sending from: {self.account}")
+        logger.info(f"[ACCOUNT-FOUND] ✓ Successfully connected with account: {found_smtp}")
     
     def _find_account(self) -> object:
         """
@@ -191,15 +193,28 @@ class OutlookSender:
         available = []
         
         try:
-            for i in range(1, self._namespace.Accounts.Count + 1):
+            total_accounts = self._namespace.Accounts.Count
+            logger.info(f"[ACCOUNT-SEARCH] Total accounts in Outlook: {total_accounts}")
+            
+            for i in range(1, total_accounts + 1):
                 acc = self._namespace.Accounts.Item(i)
                 smtp = getattr(acc, "SmtpAddress", "")
                 available.append(smtp)
                 
+                match = "✓ MATCH" if smtp.lower() == self.account.lower() else ""
+                logger.info(f"[ACCOUNT-SEARCH] Account [{i}] = '{smtp}' {match}")
+                
                 if smtp.lower() == self.account.lower():
+                    logger.info(f"[ACCOUNT-SELECTED] ✓ Found requested account: {smtp}")
                     return acc
+            
+            # No match found
+            logger.error(
+                f"[ACCOUNT-ERROR] Account '{self.account}' not found in Outlook.\n"
+                f"[ACCOUNT-ERROR] Available accounts: {', '.join(available)}"
+            )
         except Exception as e:
-            logger.error(f"Error finding account: {e}")
+            logger.error(f"[ACCOUNT-ERROR] Error finding account: {e}", exc_info=True)
         
         raise OutlookAccountNotFoundError(self.account, available)
     
@@ -325,13 +340,30 @@ class OutlookSender:
         Args:
             email: Email to send.
         """
-        # Create mail item
-        mail = self._outlook.CreateItem(0)  # 0 = olMailItem
+        # Log which account is sending this email
+        account_smtp = getattr(self._account_obj, "SmtpAddress", "UNKNOWN")
+        logger.debug(f"[SEND] Using account '{account_smtp}' to send to {email.to}")
         
-        # Set sender account
-        mail.SendUsingAccount = self._account_obj
+        # Verify account object is valid
+        try:
+            account_email = self._account_obj.SmtpAddress
+            logger.debug(f"[SEND-METHOD] Account object valid: {account_email}")
+        except Exception as e:
+            logger.error(f"[SEND-METHOD] Account object invalid: {e}")
+            raise
         
-        # Set recipients
+        # Create mail item (try account's Outbox first)
+        try:
+            store = self._account_obj.DeliveryStore
+            outbox = store.GetDefaultFolder(4)  # 4 = olFolderOutbox
+            mail = outbox.Items.Add(0)  # 0 = olMailItem
+            logger.debug(f"[SEND-METHOD] Created mail item in account's Outbox folder")
+        except Exception as e:
+            logger.warning(f"[SEND-METHOD] Could not create mail in account store: {e}")
+            logger.info(f"[SEND-METHOD] Falling back to CreateItem")
+            mail = self._outlook.CreateItem(0)  # 0 = olMailItem
+        
+        # Set recipients FIRST (some COM properties require recipients to be set first)
         for recipient in email.to:
             mail.Recipients.Add(recipient)
         
@@ -345,6 +377,23 @@ class OutlookSender:
         
         # Resolve all recipients
         mail.Recipients.ResolveAll()
+        
+        # NOW set SendUsingAccount AFTER recipients are resolved
+        try:
+            mail.SendUsingAccount = self._account_obj
+            logger.debug(f"[SEND-METHOD] Set SendUsingAccount property (after recipient setup)")
+        except Exception as e:
+            logger.error(f"[SEND-METHOD] Failed to set SendUsingAccount: {e}")
+        
+        # Verify which account will be used
+        try:
+            if mail.SendUsingAccount is not None:
+                actual_account = mail.SendUsingAccount.SmtpAddress
+                logger.info(f"[SEND-VERIFY] Mail item's SendUsingAccount = '{actual_account}'")
+            else:
+                logger.warning(f"[SEND-VERIFY] Mail item's SendUsingAccount is None")
+        except Exception as e:
+            logger.warning(f"[SEND-VERIFY] Could not verify SendUsingAccount: {e}")
         
         # Set content
         mail.Subject = email.subject
