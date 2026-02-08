@@ -41,9 +41,11 @@ from typing import List, Optional
 try:
     import win32com.client
     import pywintypes
+    import pythoncom
     HAS_WIN32COM = True
 except ImportError:
     HAS_WIN32COM = False
+    pythoncom = None
 
 from core.retry import retry_operation, RetryConfig
 from core.state import ContentHashTracker, StateTracker
@@ -159,6 +161,10 @@ class OutlookSender:
         logger.debug("Connecting to Outlook for sending...")
         
         try:
+            # Initialize COM for this thread
+            if pythoncom:
+                pythoncom.CoInitialize()
+            
             self._outlook = win32com.client.Dispatch("Outlook.Application")
             self._namespace = self._outlook.GetNamespace("MAPI")
         except pywintypes.com_error as e:
@@ -270,16 +276,8 @@ class OutlookSender:
                 f"Subject: {email.subject}"
             )
             
-            # Still track as "sent" in dry-run to verify logic
-            if self.state_tracker:
-                self.state_tracker.mark_processed(
-                    email.get_content_hash(),
-                    metadata={
-                        "to": email.to,
-                        "subject": email.subject,
-                        "dry_run": True,
-                    }
-                )
+            # Do NOT track dry-run emails in state — they weren't actually sent
+            # Tracking them would cause false "duplicate" detection on real runs
             
             self.sent_count += 1
             return True

@@ -58,13 +58,27 @@ class ExcelReader:
         self._is_xls = self._ext in (".xls",)
 
     def open(self):
-        """Open the Excel workbook."""
+        """Open the Excel workbook.
+
+        For .xls files with formulas, uses win32com (Excel COM) to
+        recalculate and save a temp .xlsx copy, then reads via openpyxl.
+        Falls back to xlrd if win32com is not available.
+        """
         if self._is_xls:
+            # Try win32com first for proper formula evaluation
+            if self._try_open_via_com():
+                logger.info(f"Opened Excel file (via COM): {self.excel_path}")
+                return
+
+            # Fallback to xlrd (formula cells will return None)
             try:
                 import xlrd
             except ImportError:
                 raise ImportError("xlrd is required for .xls files: pip install xlrd")
             self._workbook = xlrd.open_workbook(str(self.excel_path))
+            logger.warning(
+                "Opened with xlrd — formula cells will not have computed values"
+            )
         else:
             import openpyxl
 
@@ -73,11 +87,82 @@ class ExcelReader:
             )
         logger.info(f"Opened Excel file: {self.excel_path}")
 
+    def _try_open_via_com(self) -> bool:
+        """Open .xls via Excel COM, recalculate, and save as temp .xlsx.
+
+        This ensures formula cells have their computed values.
+
+        Returns:
+            True if successfully opened via COM, False otherwise.
+        """
+        try:
+            import win32com.client as win32
+            import pythoncom
+        except ImportError:
+            logger.debug("win32com not available, skipping COM reader")
+            return False
+
+        try:
+            pythoncom.CoInitialize()
+            excel_app = win32.Dispatch("Excel.Application")
+            excel_app.Visible = False
+            excel_app.DisplayAlerts = False
+
+            try:
+                wb = excel_app.Workbooks.Open(
+                    str(self.excel_path.resolve()),
+                    ReadOnly=True,
+                    UpdateLinks=0,  # Don't update external links
+                )
+
+                # Set manual calculation AFTER opening to preserve
+                # cached formula values when referenced sheets are missing
+                try:
+                    excel_app.Calculation = -4135  # xlCalculationManual
+                    excel_app.AskToUpdateLinks = False
+                except Exception:
+                    pass
+
+                # Do NOT call CalculateFull() — preserve cached formula values
+
+                # Save as temp .xlsx so openpyxl can read computed values
+                temp_xlsx = self.excel_path.parent / f"_temp_{self.excel_path.stem}.xlsx"
+                wb.SaveAs(
+                    str(temp_xlsx.resolve()),
+                    FileFormat=51,  # xlOpenXMLWorkbook
+                )
+                wb.Close(SaveChanges=False)
+            finally:
+                excel_app.Quit()
+                pythoncom.CoUninitialize()
+
+            # Now open the temp .xlsx with openpyxl
+            import openpyxl
+            self._workbook = openpyxl.load_workbook(
+                str(temp_xlsx), data_only=True, read_only=True
+            )
+            self._is_xls = False  # Switch to openpyxl mode for reading
+            self._temp_xlsx = temp_xlsx  # Track for cleanup
+            return True
+
+        except Exception as e:
+            logger.warning(f"COM reader failed, falling back to xlrd: {e}")
+            return False
+
     def close(self):
-        """Close the workbook."""
+        """Close the workbook and clean up temp files."""
         if self._workbook and not self._is_xls:
             self._workbook.close()
         self._workbook = None
+
+        # Clean up temp .xlsx if we created one via COM
+        temp = getattr(self, "_temp_xlsx", None)
+        if temp and Path(temp).exists():
+            try:
+                Path(temp).unlink()
+                logger.debug(f"Cleaned up temp file: {temp}")
+            except Exception:
+                pass
 
     def __enter__(self):
         self.open()
@@ -102,7 +187,8 @@ class ExcelReader:
         """
         Get cell value by 0-based row and col index.
 
-        For xlrd, handles error type cells by returning None.
+        Handles error type cells by returning None (including Excel error
+        strings like #NAME?, #REF!, etc. and COM error integers).
         """
         if self._is_xls:
             import xlrd
@@ -120,10 +206,28 @@ class ExcelReader:
                     return value  # Return as float for now
                 except Exception:
                     return value
-            return value
+            return self._filter_error_value(value)
         else:
             cell = sheet.cell(row=row + 1, column=col + 1)
-            return cell.value
+            return self._filter_error_value(cell.value)
+
+    @staticmethod
+    def _filter_error_value(value: Any) -> Any:
+        """Return None for Excel error values (strings or COM integers)."""
+        if value is None:
+            return None
+        # COM error integers (e.g., -2146826259 for #NAME?)
+        if isinstance(value, int) and value < -2000000000:
+            return None
+        # Excel error strings
+        if isinstance(value, str) and value.strip().startswith("#"):
+            error_strings = {
+                "#DIV/0!", "#N/A", "#NAME?", "#NULL!",
+                "#NUM!", "#REF!", "#VALUE!", "#GETTING_DATA",
+            }
+            if value.strip() in error_strings:
+                return None
+        return value
 
     def _get_cell_by_ref(self, sheet, cell_ref: str) -> Any:
         """Get cell value by reference like 'A1', 'B3', etc."""
@@ -211,10 +315,133 @@ class ExcelReader:
                 val = self._get_cell_value(sheet, r, c)
                 emp["columns"][col_letter] = val
 
+            # If Data sheet columns have errors (None values due to XLOOKUP failures),
+            # try to lookup values directly from 'bang luong' sheet
+            self._fill_from_bang_luong(emp)
+
             employees.append(emp)
 
         logger.info(f"Read {len(employees)} employees from {data_sheet}")
         return employees
+
+    def _fill_from_bang_luong(self, employee: Dict[str, Any]):
+        """
+        Fill missing employee data by looking up in 'bang luong' sheet.
+        
+        The Data sheet uses XLOOKUP formulas that may not work in all Excel versions.
+        This method provides a fallback by directly reading from 'bang luong' sheet.
+        
+        Maps MNV → values from 'bang luong' columns based on the XLOOKUP formulas:
+        - Column B (Name): bang luong column M
+        - Column J: bang luong column AE  
+        - Column K: bang luong column AF
+        - Column N: bang luong column AI
+        - etc.
+        """
+        try:
+            # Check if we need to fill (if key columns are None/missing)
+            columns = employee.get("columns", {})
+            mnv = employee.get("mnv")
+            if not mnv:
+                return
+            
+            # Check if we need to lookup (Name is None or error value means XLOOKUP failed)
+            name_val = columns.get("B")
+            # Error code 29 is #VALUE! error in xlrd
+            # If name is None, empty, numeric error code, or not a string, we need lookup
+            needs_lookup = (
+                name_val is None 
+                or name_val == "" 
+                or (isinstance(name_val, (int, float)) and name_val in (29, 15,  42, 7))  # Common Excel error codes
+                or len(str(name_val).strip()) < 2  # Name too short to be valid
+            )
+            
+            if not needs_lookup:
+                # Data sheet values are OK, no need for lookup
+                logger.debug(f"Data sheet values OK for MNV {mnv}, skipping bang luong lookup")
+                return
+            
+            logger.debug(f"Data sheet has errors for MNV {mnv}, attempting bang luong lookup")
+            
+            # Try to read bang luong sheet
+            try:
+                bang_luong_sheet = self._get_sheet("bang luong")
+            except Exception as e:
+                # bang luong sheet doesn't exist, can't help
+                logger.warning(f"Could not access 'bang luong' sheet: {e}")
+                return
+            
+            # Find the row in bang luong where column L matches MNV
+            # Column L is the 12th column (0-indexed: 11)
+            if self._is_xls:
+                nrows = bang_luong_sheet.nrows
+            else:
+                nrows = bang_luong_sheet.max_row or 0
+            
+            matched_row_idx = None
+            mnv_str = str(mnv).strip()
+            
+            for r_idx in range(nrows):
+                val = self._get_cell_value(bang_luong_sheet, r_idx, 11)  # Column L (0-indexed: 11)
+                if val is not None:
+                    val_str = str(val).strip().rstrip('.0')  # Handle 6046072.0 → 6046072
+                    if val_str == mnv_str:
+                        matched_row_idx = r_idx
+                        break
+            
+            if matched_row_idx is None:
+                logger.warning(f"MNV {mnv} not found in 'bang luong' sheet")
+                return
+            
+            # Map bang luong columns to Data sheet columns based on XLOOKUP formulas
+            # Data B: =XLOOKUP(A4, L:L, M:M) → bang luong col M (index 12)
+            # Data J: =XLOOKUP(A4, L:L, AE:AE) → bang luong col AE (index 30)
+            # Data K: =XLOOKUP(A4, L:L, T:T) → bang luong col T (index 19) - NGÀY CÔNG CHUẨN
+            # Data N: =XLOOKUP(A4, L:L, V:V) → bang luong col V (index 21) - CÔNG THỰC TẾ
+            # Data O: =XLOOKUP(A4, L:L, AJ:AJ) → bang luong col AJ (index 35) - LƯƠNG THEO GIỜ CÔNG
+            # Data P: =XLOOKUP(A4, L:L, AO:AO) → bang luong col AO (index 40) - TIỀN LƯƠNG LÀM ĐÊM
+            # Data Q: =XLOOKUP(A4, L:L, AM:AM) → bang luong col AM (index 38) - TỔNG LƯƠNG LÀM THÊM GIỜ
+            # Data R: =XLOOKUP(A4, L:L, AQ:AQ) → bang luong col AQ (index 42) - THANH TOÁN QUỸ NGHỈ BÙ
+            # Data S: =XLOOKUP(A4, L:L, AP:AP) → bang luong col AP (index 41) - THANH TOÁN PHÉP NĂM
+            # Data T: =XLOOKUP(A4, L:L, BA:BA) → bang luong col BA (index 52) - HỖ TRỢ CHI PHÍ GỬI XE
+            
+            lookup_map = {
+                "B": 12,   # M (Name)
+                "J": 30,   # AE (THU NHẬP CƠ BẢN GROSS - Mức lương)
+                "K": 19,   # T (NGÀY CÔNG CHUẨN - Công chuẩn)
+                "N": 21,   # V (CÔNG THỰC TẾ - Tổng công)
+                "O": 35,   # AJ (LƯƠNG THEO GIỜ CÔNG)
+                "P": 40,   # AO (TIỀN LƯƠNG LÀM ĐÊM)
+                "Q": 38,   # AM (TỔNG LƯƠNG LÀM THÊM GIỜ _TAX)
+                "R": 42,   # AQ (THANH TOÁN QUỸ NGHỈ BÙ)
+                "S": 41,   # AP (THANH TOÁN PHÉP NĂM)
+                "T": 52,   # BA (HỖ TRỢ CHI PHÍ GỬI XE)
+                "U": 38,   # AM (TỔNG LƯƠNG LÀM THÊM GIỜ _TAX - for calculations)
+                "V": 54,   # BC (HỖ TRỢ ĐIỆN THOẠI)
+                "W": 43,   # AR (PC CHUYÊN MÔN / TAY NGHỀ)
+                "X": 44,   # AS (PC KIÊM NHIỆM)
+                "Y": 45,   # AT (PC TRÁCH NHIỆM)
+                "Z": 46,   # AU (PHỤ CẤP TRÁCH NHIỆM CÔNG VIỆC)
+                "AA": 47,  # AV (PHỤ CẤP TRÁCH NHIỆM ĐỀ BẠT)
+                "AB": 48,  # AW (TIỀN ĂN GIỮA CA - CHỊU THUẾ)
+                "AC": 49,  # AX (TIỀN ĂN GIỮA CA - KHÔNG CHỊU THUẾ)
+                "AD": 50,  # AY ( HỖ TRỢ NHÀ Ở)
+                "AH": 54,  # BC (HỖ TRỢ ĐIỆN THOẠI - or net payment calculation)
+            }
+            
+            for data_col, bl_col_idx in lookup_map.items():
+                if columns.get(data_col) is None:  # Only fill if missing
+                    val = self._get_cell_value(bang_luong_sheet, matched_row_idx, bl_col_idx)
+                    columns[data_col] = val
+            
+            # Also update the name field in employee dict
+            if columns.get("B"):
+                employee["name"] = str(columns["B"]).strip()
+            
+            logger.debug(f"Filled data for MNV {mnv} from 'bang luong' sheet")
+            
+        except Exception as e:
+            logger.warning(f"Failed to fill from 'bang luong' sheet for MNV {employee.get('mnv')}: {e}")
 
     def read_email_template(
         self,

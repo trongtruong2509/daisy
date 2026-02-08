@@ -1,20 +1,24 @@
 """
-Main orchestrator for Payslip generation and distribution.
+Main orchestrator for Payslip generation and distribution (Excel COM variant).
+
+Uses Excel COM for ALL formula evaluation, guaranteeing correct
+values regardless of formula complexity (VLOOKUP, XLOOKUP, etc.).
 
 Workflow:
 1. Load configuration
-2. Read employee data from Excel
+2. Read employee metadata from Excel (MNV, Name, Email, Password)
 3. Validate all data (fail-fast)
-4. Generate payslip Excel files (direct population)
+4. Generate payslip Excel files via COM (set B3=MNV, copy, paste values)
 5. Convert to password-protected PDFs
 6. Compose and send emails via Outlook
 7. Report summary
 
 Usage:
-    cd tools/payslip-phuclong
+    cd tools/payslip-phuclong-ecom
     python main.py
 """
 
+import gc
 import logging
 import sys
 import time
@@ -29,7 +33,7 @@ from core.state import StateTracker
 from office.outlook.models import NewEmail
 from office.outlook.sender import OutlookSender
 
-from config import load_payslip_config
+from config import load_config
 from excel_reader import ExcelReader
 from validator import DataValidator
 from payslip_generator import PayslipGenerator
@@ -43,13 +47,13 @@ logger = get_logger(__name__)
 def print_banner():
     """Print tool banner."""
     print("\n" + "=" * 60)
-    print("  Payslip Generator & Distributor - Phuc Long")
+    print("  Payslip Generator & Distributor - Phuc Long (Excel COM)")
     print("  Powered by Daisy Foundation")
     print("=" * 60)
 
 
 def print_pre_summary(config, employee_count: int):
-    """Print pre-execution summary for user confirmation."""
+    """Print pre-execution summary."""
     print("\n--- Pre-Execution Summary ---")
     print(f"  Excel file      : {config.excel_path}")
     print(f"  Payroll date     : {config.date}")
@@ -89,15 +93,17 @@ def confirm_proceed() -> bool:
 
 def main():
     """Main entry point."""
+    import pythoncom
+    pythoncom.CoInitialize()
+
     start_time = time.time()
     print_banner()
 
     # ─── 1. Load Configuration ───
     print("Loading configuration...")
     tool_dir = Path(__file__).resolve().parent
-    config = load_payslip_config(tool_dir=tool_dir)
+    config = load_config(tool_dir=tool_dir)
 
-    # Validate config
     config_errors = config.validate()
     if config_errors:
         print("\nConfiguration errors:")
@@ -106,10 +112,8 @@ def main():
         print("\nPlease fix .env file and try again.")
         sys.exit(1)
 
-    # Create directories
     config.ensure_directories()
 
-    # Set up logging
     setup_logging(
         log_dir=config.log_dir,
         level=config.log_level,
@@ -119,7 +123,7 @@ def main():
     logger.info(f"Excel path: {config.excel_path}")
     logger.info(f"Date: {config.date}")
 
-    # ─── 2. Read Employee Data ───
+    # ─── 2. Read Employee Metadata ───
     print("Reading employee data from Excel...")
     try:
         with ExcelReader(config.excel_path) as reader:
@@ -133,14 +137,12 @@ def main():
                 col_password=config.col_password,
             )
 
-            # Read email template
             email_template = reader.read_email_template(
                 sheet_name=config.email_body_sheet,
                 body_cells=config.email_body_cells,
                 date_cell=config.email_date_cell,
             )
 
-            # Read subject (from template sheet or .env override)
             if config.email_subject:
                 subject = config.email_subject
             else:
@@ -153,6 +155,10 @@ def main():
         logger.error(f"Failed to read Excel file: {e}")
         print(f"\nERROR: Failed to read Excel file: {e}")
         sys.exit(1)
+
+    # Allow ExcelReader's COM to fully release before generator starts
+    gc.collect()
+    time.sleep(1)
 
     if not employees:
         logger.error("No employee data found")
@@ -189,34 +195,33 @@ def main():
     else:
         print("[DRY-RUN MODE] Simulating — no emails will be sent\n")
 
-    # ─── 4. Generate Payslip Excel Files ───
-    print("Generating payslip Excel files...")
+    # ─── 4. Generate Payslip Excel Files via COM ───
+    print("Generating payslip Excel files (via Excel COM)...")
     generator = PayslipGenerator(
-        template_path=config.output_dir / "_template.xlsx",
         output_dir=config.output_dir,
-        cell_mapping=config.cell_mapping,
-        calc_mapping=config.calc_mapping,
         date_str=config.date,
-        filename_pattern=config.pdf_filename_pattern.replace(".pdf", ".xlsx"),
+        filename_pattern=config.pdf_filename_pattern,
     )
 
-    # Prepare template from source TBKQ sheet
     try:
-        generator.prepare_template(
+        results = generator.generate_batch(
+            employees=employees,
             source_xls=config.excel_path,
             template_sheet=config.template_sheet,
+            data_sheet=config.data_sheet,
+            col_mnv=config.col_mnv,
         )
     except Exception as e:
-        logger.error(f"Template preparation failed: {e}")
-        print(f"\nERROR: Template preparation failed: {e}")
+        logger.error(f"Payslip generation failed: {e}")
+        print(f"\nERROR: Payslip generation failed: {e}")
         sys.exit(1)
-
-    # Generate payslips using direct cell mapping from Data sheet columns
-    # This reads values from employee data and fills TBKQ cells directly
-    results = generator.generate_batch(employees)
 
     generated = sum(1 for r in results if r["success"])
     print(f"  Generated {generated}/{len(employees)} payslips")
+
+    # Allow Excel COM to fully release before starting PDF converter
+    gc.collect()
+    time.sleep(2)
 
     # ─── 5. Convert to Password-Protected PDFs ───
     print("Converting payslips to PDF...")
@@ -232,8 +237,6 @@ def main():
     except Exception as e:
         logger.error(f"PDF conversion failed: {e}")
         print(f"\nERROR: PDF conversion failed: {e}")
-        # Continue with whatever PDFs we have
-        pass
 
     converted = sum(1 for r in results if r.get("pdf_path"))
     print(f"  Converted {converted}/{generated} PDFs")
@@ -250,7 +253,6 @@ def main():
     composed = sum(1 for r in results if r.get("email_data"))
     print(f"  Composed {composed} emails")
 
-    # Send emails
     print("Sending emails via Outlook...")
     state_tracker = StateTracker(
         state_dir=config.state_dir,
@@ -277,7 +279,6 @@ def main():
                     error_count += 1
                     continue
 
-                # Build NewEmail
                 email = NewEmail(
                     to=email_data["to"],
                     subject=email_data["subject"],
@@ -298,7 +299,6 @@ def main():
                     error_count += 1
                     logger.error(f"[{i}/{composed}] Failed for {name}: {e}")
 
-            # Log sender stats
             print(
                 f"  Sent: {sender.sent_count}, "
                 f"Skipped: {sender.skipped_count}, "
@@ -307,9 +307,9 @@ def main():
 
     except ImportError:
         logger.error("win32com not available - cannot send emails")
-        print("\nERROR: Outlook COM not available. Run on Windows with Outlook installed.")
+        print("\nERROR: Outlook COM not available.")
         if config.dry_run:
-            print("[DRY-RUN] Would have sent emails. Skipping Outlook in dry-run mode.")
+            print("[DRY-RUN] Would have sent emails. Skipping Outlook.")
             sent_count = composed
     except Exception as e:
         logger.error(f"Email sending failed: {e}")
@@ -327,11 +327,15 @@ def main():
         "elapsed": elapsed,
     }
     print_post_summary(stats)
-
     logger.info(f"Payslip processing complete: {stats}")
 
-    # Save state
     state_tracker.save()
+
+    # Release COM apartment
+    try:
+        pythoncom.CoUninitialize()
+    except Exception:
+        pass
 
     if error_count > 0:
         print(f"WARNING: {error_count} error(s) occurred. Check logs for details.")

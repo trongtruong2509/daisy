@@ -153,7 +153,10 @@ def setup_logging(
     root_logger.addHandler(file_handler)
     
     # Console handler (concise)
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Use UTF-8 encoding for Windows console to support Unicode
+    import io
+    console_stream = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(console_log_level)
     console_handler.setFormatter(ConsoleFormatter(use_colors=True))
     root_logger.addHandler(console_handler)

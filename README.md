@@ -1,16 +1,27 @@
-# Office Automation Foundation
+# Daisy Automation Platform
 
-A **production-grade Python foundation** for automating office work on Windows, with a primary focus on **Outlook email automation**.
+A **production-grade Python foundation** for automating office work on Windows, with a primary focus on **Outlook email automation** and integrated automation tools.
 
-This project provides reusable modules for building reliable, safe email automation tools - not one-off scripts.
+This project provides reusable modules for building reliable, safe email automation tools and a master launcher for managing multiple automation tools from a single shared virtual environment.
 
 ## Features
 
+### Core Foundation
 - **Outlook Email Operations**: Read, filter, save, and send emails via Outlook Desktop
 - **Multi-Account Support**: Work with multiple accounts in one Outlook profile
 - **Safety First**: Dry-run mode, duplicate prevention, comprehensive logging
 - **Extensible Parsing**: Foundation for extracting data from email content
 - **Resilient Design**: Retry logic, state tracking, crash recovery
+
+### Master Launcher System
+- **Single Shared Virtual Environment**: One setup for all tools
+- **Interactive Menu**: Easy access to all tools and scripts
+- **Direct Invocation**: Run specific tools from command line
+- **Auto-Discovery**: Automatically detects tools in `tools/` directory
+- **Simple for Non-Technical Users**: Double-click `.bat` files to run
+
+### Available Tools
+- **payslip-phuclong**: Automated payslip generation and email distribution
 
 ## Target Environment
 
@@ -38,12 +49,26 @@ setup.bat
 This will:
 - Create a Python virtual environment
 - Install dependencies
-- Create `.env` from template
+- Create `.Tools
 
-### 3. Configure
+**Interactive menu** (recommended for new users):
+```cmd
+run.bat
+```
 
-Edit `.env` and set your Outlook account:
+**Direct tool invocation**:
+```cmd
+run.bat payslip-phuclong
+```
 
+**Run example scripts**:
+```cmd
+run.bat example_read_emails
+```
+
+**Get help**:
+```cmd
+run.bat --help
 ```ini
 OUTLOOK_ACCOUNT=your.email@company.com
 DRY_RUN=true
@@ -61,6 +86,7 @@ run.bat example_read_emails
 
 ```
 daisy/
+├── venv/                    # Virtual environment (gitignored)
 ├── core/                    # Core utilities
 │   ├── __init__.py
 │   ├── config.py            # Configuration management
@@ -79,13 +105,21 @@ daisy/
 │   ├── base.py              # Parser interface
 │   ├── text.py              # Plain text parsing
 │   └── html.py              # HTML parsing
-├── scripts/                 # Runnable automation scripts
+├── tools/                   # Automation tools
+│   └── payslip-phuclong/    # Payslip generation tool
+│       ├── main.py          # Tool entry point
+│       ├── run.bat          # Tool wrapper
+│       ├── .env.example     # Tool configuration template
+│       └── README.md        # Tool documentation
+├── scripts/                 # Utility scripts
 │   ├── example_read_emails.py
 │   └── example_send_email.py
-├── .env.example             # Configuration template
-├── requirements.txt         # Python dependencies
-├── setup.bat                # Windows setup script
-├── run.bat                  # Script runner
+├── docs/                    # Documentation
+│   └── venv-strategy.md     # Virtual environment strategy
+├── .env.example             # Root configuration template
+├── requirements.txt         # Shared Python dependencies
+├── setup.bat                # Master setup (creates venv)
+├── run.bat                  # Master launcher
 └── README.md                # This file
 ```
 
@@ -104,6 +138,63 @@ All configuration is via `.env` file. Copy `.env.example` to `.env` and adjust:
 | `OUTPUT_DIR` | Output file directory | `./output` |
 | `STATE_DIR` | State tracking directory | `./state` |
 | `LOG_LEVEL` | DEBUG, INFO, WARNING, ERROR | `INFO` |
+
+## Master Launcher and Setup
+
+### Setup Script (`setup.bat`)
+
+The setup script creates the virtual environment and installs all dependencies. It supports several options:
+
+**Standard setup** (first time):
+```cmd
+setup.bat
+```
+
+**Recreate virtual environment** (if corrupted):
+```cmd
+setup.bat --recreate
+```
+
+**Upgrade installed packages**:
+```cmd
+setup.bat --upgrade
+```
+
+The setup script will:
+1. Check Python 3.14+ is installed
+2. Create or update virtual environment
+3. Install all dependencies from `requirements.txt`
+4. Validate core modules
+5. Create `.env` from template if needed
+
+### Master Launcher (`run.bat`)
+
+The master launcher provides three ways to run tools:
+
+**1. Interactive Menu** (easiest for non-technical users):
+```cmd
+run.bat
+```
+This shows a numbered menu of all available tools and scripts.
+
+**2. Direct Tool Invocation** (fastest for regular users):
+```cmd
+run.bat payslip-phuclong
+run.bat example_read_emails
+```
+
+**3. Tool Wrapper** (from tool directory):
+```cmd
+cd tools\payslip-phuclong
+run.bat
+```
+
+The launcher automatically:
+- Activates the virtual environment
+- Discovers available tools in `tools/` directory
+- Discovers available scripts in `scripts/` directory
+- Handles errors gracefully
+- Deactivates virtual environment on exit
 
 ## Safety Guarantees
 

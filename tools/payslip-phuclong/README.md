@@ -40,12 +40,12 @@ Key dependencies:
    cd daisy
    ```
 
-2. **Install dependencies**:
+2. **Run the setup script** (creates virtual environment and installs dependencies):
    ```bash
-   pip install -r requirements.txt
+   setup.bat
    ```
 
-3. **Navigate to the tool directory**:
+3. **Navigate to the tool directory** (optional):
    ```bash
    cd tools/payslip-phuclong
    ```
@@ -109,13 +109,30 @@ TBKQ_CALC_D38=U+W+X+Y     # Sum of columns U,W,X,Y
 
 ## Usage
 
+### Quick Start (Windows)
+
+**From repository root:**
+```cmd
+REM Interactive menu
+run.bat
+
+REM Direct tool invocation
+run.bat payslip-phuclong
+```
+
+**From this tool directory:**
+```cmd
+REM Tool wrapper (calls master launcher)
+run.bat
+```
+
 ### Basic Usage
 
 1. **Prepare your Excel file** with employee data in the Data sheet
 2. **Configure `.env`** with the correct date and Outlook account
 3. **Run in dry-run mode first** (to verify):
-   ```bash
-   python main.py
+   ```cmd
+   run.bat payslip-phuclong
    ```
 4. **Review the pre-execution summary** and confirm
 5. **Check the output** in `./output/` and logs in `./logs/`
@@ -130,8 +147,8 @@ Once verified in dry-run mode, disable dry-run:
    ```
 
 2. Run the tool:
-   ```bash
-   python main.py
+   ```cmd
+   run.bat payslip-phuclong
    ```
 
 3. **Confirm when prompted**:
@@ -139,10 +156,15 @@ Once verified in dry-run mode, disable dry-run:
    Proceed with payslip generation and email sending? (yes/no): yes
    ```
 
-### Command-Line Workflow
+### Python Direct Invocation (Advanced)
+
+If you prefer to use Python directly:
 
 ```bash
-# Step 1: Test configuration
+# Activate virtual environment first
+venv\Scripts\activate.bat
+
+# Run the tool
 python main.py  # with DRY_RUN=true
 
 # Step 2: Verify generated files

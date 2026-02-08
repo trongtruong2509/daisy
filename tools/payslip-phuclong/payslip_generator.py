@@ -1,9 +1,14 @@
 """
-Payslip generator using openpyxl for direct population.
+Payslip generator using Excel COM (win32com).
 
-Creates individual payslip Excel files by copying the TBKQ template
-and filling cells with employee data from the Data sheet.
-No VLOOKUP formulas - all values are written directly.
+Replicates the VBA macro approach:
+  1. Open source workbook with Excel COM
+  2. For each employee, set TBKQ!B3 = MNV to trigger INDEX/MATCH formulas
+  3. Copy the calculated TBKQ sheet to a new workbook
+  4. Paste as values, delete helper columns, clean up
+  5. Save as .xlsx
+
+Falls back to openpyxl-based generation when COM is not available.
 """
 
 import logging
@@ -16,6 +21,32 @@ from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string
 
 logger = logging.getLogger(__name__)
+
+# Excel error values returned by COM (VBA error codes)
+_EXCEL_ERROR_VALUES = {
+    -2146826281,  # #DIV/0!
+    -2146826246,  # #N/A
+    -2146826259,  # #NAME?
+    -2146826288,  # #NULL!
+    -2146826252,  # #NUM!
+    -2146826265,  # #REF!
+    -2146826273,  # #VALUE!
+}
+
+# Excel error strings that may appear in cell values
+_EXCEL_ERROR_STRINGS = {
+    "#DIV/0!", "#N/A", "#NAME?", "#NULL!",
+    "#NUM!", "#REF!", "#VALUE!", "#GETTING_DATA",
+}
+
+
+def _is_excel_error(value) -> bool:
+    """Check if a value is an Excel error (COM integer or string)."""
+    if isinstance(value, int) and value in _EXCEL_ERROR_VALUES:
+        return True
+    if isinstance(value, str) and value.strip() in _EXCEL_ERROR_STRINGS:
+        return True
+    return False
 
 
 def _col_letter_to_index(col: str) -> int:
@@ -84,10 +115,12 @@ class PayslipGenerator:
         Prepare a clean .xlsx template from the source .xls file.
 
         Uses win32com (Excel COM) to:
-        1. Open the .xls file
+        1. Open the .xls file, recalculate all formulas
         2. Copy the TBKQ sheet to a new workbook
-        3. Clear formulas (paste values)
-        4. Save as .xlsx template
+        3. Paste as values (while source is still open for formula resolution)
+        4. Delete helper columns F/G, clean up buttons
+        5. Clear cells that will be filled dynamically per employee
+        6. Save as .xlsx template
 
         This is a one-time operation per run.
 
@@ -102,6 +135,7 @@ class PayslipGenerator:
 
         if template_out.exists():
             logger.info(f"Template already prepared: {template_out}")
+            self.template_path = template_out
             return template_out
 
         logger.info(f"Preparing template from {source_xls}...")
@@ -118,25 +152,41 @@ class PayslipGenerator:
 
             try:
                 wb = excel.Workbooks.Open(str(source_xls.resolve()))
+
+                # Recalculate all formulas while all sheets are present
+                excel.CalculateFull()
+
                 ws = wb.Sheets(template_sheet)
 
                 # Copy sheet to new workbook
                 ws.Copy()
                 new_wb = excel.ActiveWorkbook
-
                 new_ws = new_wb.ActiveSheet
 
-                # Paste as values to remove formulas
+                # Paste as values FIRST — while source workbook is still open
+                # so cross-sheet formula results are captured correctly
                 new_ws.Cells.Copy()
                 new_ws.Cells.PasteSpecial(Paste=-4163)  # xlPasteValues
                 excel.CutCopyMode = False
 
-                # Delete columns F and G (mapping hints, not needed in output)
+                # Now delete columns F and G (mapping hints, not needed)
                 # Column G first (higher index), then F
                 new_ws.Columns("G").Delete()
                 new_ws.Columns("F").Delete()
 
-                # Clear cells used by macro buttons (K2:L2)
+                # Clear cells that will be filled dynamically per employee
+                cells_to_clear = (
+                    list(self.cell_mapping.keys())
+                    + list(self.calc_mapping.keys())
+                )
+                for cell_ref in cells_to_clear:
+                    try:
+                        new_ws.Range(cell_ref).ClearContents()
+                    except Exception:
+                        pass
+
+                # Clear cells used by macro buttons (originally K2:L2,
+                # shifted to I2:J2 after column deletion)
                 try:
                     new_ws.Range("I2", "J2").ClearContents()
                 except Exception:
@@ -173,6 +223,195 @@ class PayslipGenerator:
                 "win32com not available. Creating template from scratch with openpyxl."
             )
             return self._prepare_template_openpyxl(source_xls, template_sheet)
+
+    def generate_batch_via_com(
+        self,
+        employees: List[Dict[str, Any]],
+        source_xls: Path,
+        template_sheet: str = "TBKQ",
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate payslips by replicating the VBA macro approach.
+
+        For each employee:
+        1. Set TBKQ!B3 = MNV (triggers INDEX/MATCH recalculation)
+        2. Copy the TBKQ sheet to a new workbook
+        3. Paste as values, delete columns F/G, clean up
+        4. Save as .xlsx with employee-specific name
+
+        This produces payslips with all values correctly resolved,
+        even when Data sheet formulas reference external sheets.
+
+        Args:
+            employees: List of employee data dicts.
+            source_xls: Path to the source Excel file.
+            template_sheet: Name of the TBKQ sheet.
+
+        Returns:
+            List of result dicts with 'employee', 'xlsx_path', 'success'.
+        """
+        import time
+        import win32com.client as win32
+        import pythoncom
+
+        results = []
+        total = len(employees)
+
+        # Allow any previous COM session to fully release
+        time.sleep(2)
+
+        pythoncom.CoInitialize()
+
+        # Use Dispatch (not gencache.EnsureDispatch) to avoid cache issues
+        # after a previous COM session in the same process.
+        excel = win32.Dispatch("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        try:
+            wb = excel.Workbooks.Open(
+                str(source_xls.resolve()),
+                UpdateLinks=0,  # Don't update external links
+            )
+
+            # Set manual calculation AFTER opening to prevent
+            # unnecessary recalculation during payslip generation
+            try:
+                excel.Calculation = -4135  # xlCalculationManual
+            except Exception:
+                pass  # Ignore if not available
+            excel.AskToUpdateLinks = False
+
+            for i, emp in enumerate(employees, 1):
+                mnv = emp.get("mnv", "")
+                name = emp.get("name", "")
+                password = emp.get("password", "")
+
+                logger.info(
+                    f"[{i}/{total}] Generating payslip for {name} (MNV: {mnv})"
+                )
+
+                try:
+                    xlsx_path = self._generate_one_via_com(
+                        excel, wb, template_sheet, emp
+                    )
+                    results.append({
+                        "employee": emp,
+                        "xlsx_path": xlsx_path,
+                        "success": xlsx_path is not None,
+                    })
+                except Exception as e:
+                    logger.error(
+                        f"Failed to generate payslip for {name}: {e}"
+                    )
+                    results.append({
+                        "employee": emp,
+                        "xlsx_path": None,
+                        "success": False,
+                    })
+
+            wb.Close(SaveChanges=False)
+        finally:
+            excel.Quit()
+            pythoncom.CoUninitialize()
+
+        success = sum(1 for r in results if r["success"])
+        failed = total - success
+        logger.info(
+            f"Payslip generation complete: {success} success, {failed} failed"
+        )
+        return results
+
+    def _generate_one_via_com(
+        self,
+        excel,
+        source_wb,
+        template_sheet: str,
+        employee: Dict[str, Any],
+    ) -> Optional[Path]:
+        """
+        Generate a single payslip by setting B3 and copying the TBKQ sheet.
+
+        Replicates VBA logic:
+          Range("B3") = Data.Range("A" & i)  ' set MNV
+          Worksheets("TBKQ").Copy             ' copy to new workbook
+          ... paste values, delete cols, save
+        """
+        mnv = employee.get("mnv", "")
+        name = employee.get("name", "")
+
+        # Generate output filename
+        safe_name = re.sub(r'[\\/*?:"<>|]', "_", name) if name else mnv
+        filename = self.filename_pattern.replace(
+            "{name}", safe_name
+        ).replace("{mmyyyy}", self.mmyyyy)
+        xlsx_filename = filename.replace(".pdf", ".xlsx")
+        output_path = self.output_dir / xlsx_filename
+
+        # Step 1: Set TBKQ!B3 = MNV to trigger INDEX/MATCH formulas
+        ws = source_wb.Sheets(template_sheet)
+        ws.Range("B3").Value = mnv
+
+        # Step 2: Recalculate ONLY the TBKQ sheet (not the entire workbook).
+        # This preserves cached values in the Data sheet while resolving
+        # TBKQ formulas (INDEX/MATCH) against those cached values.
+        ws.Calculate()
+
+        # Step 3: Copy the TBKQ sheet to a new workbook
+        ws.Copy()
+        new_wb = excel.ActiveWorkbook
+        new_ws = new_wb.ActiveSheet
+
+        # Step 4: Delete buttons
+        try:
+            new_ws.Buttons.Delete()
+        except Exception:
+            pass
+
+        # Step 5: Clear macro button cells (K2:L2 in original)
+        try:
+            new_ws.Range("K2", "L2").ClearContents()
+        except Exception:
+            pass
+
+        # Step 6: Delete columns F and G
+        new_ws.Columns("G").Delete()
+        new_ws.Columns("F").Delete()
+
+        # Step 7: Paste as values to freeze all formula results
+        new_ws.Cells.Copy()
+        new_ws.Cells.PasteSpecial(Paste=-4163)  # xlPasteValues
+        excel.CutCopyMode = False
+
+        # Step 8: Delete named ranges from the new workbook
+        try:
+            for named in list(new_wb.Names):
+                named.Delete()
+        except Exception:
+            pass
+
+        # Step 9: Set print area
+        new_ws.PageSetup.PrintArea = "$A$1:$E$61"
+
+        # Step 10: Update date in A2
+        a2_val = new_ws.Range("A2").Value
+        if a2_val and isinstance(a2_val, str) and self.month and self.year:
+            updated = re.sub(
+                r"tháng\s+\d{1,2}/\d{4}",
+                f"tháng {self.month}/{self.year}",
+                a2_val,
+            )
+            new_ws.Range("A2").Value = updated
+
+        # Step 11: Save as .xlsx
+        new_wb.SaveAs(
+            str(output_path.resolve()),
+            FileFormat=51,  # xlOpenXMLWorkbook
+        )
+        new_wb.Close(SaveChanges=False)
+
+        logger.debug(f"Generated payslip for {name} (MNV: {mnv}): {output_path}")
+        return output_path
 
     def _prepare_template_openpyxl(
         self, source_xls: Path, template_sheet: str
@@ -244,6 +483,10 @@ class PayslipGenerator:
             wb = load_workbook(str(output_path))
             ws = wb.active
 
+            # Debug: Check columns data
+            non_null_cols = {k: v for k, v in columns.items() if v is not None and v != 0 and v != 0.0 and v != ''}
+            logger.info(f"Filling payslip - non-null columns: {list(non_null_cols.keys())}")
+
             # Step 1: Fill direct mappings from Data columns
             filled_cells = {}
             for tbkq_cell, data_col in self.cell_mapping.items():
@@ -258,6 +501,10 @@ class PayslipGenerator:
 
             # Step 3: Update date-dependent cells
             self._update_date_cells(ws)
+
+            # Step 4: Clean up any Excel error strings that weren't overwritten
+            # These come from the template when Data sheet formulas had errors
+            self._clear_error_strings(ws)
 
             wb.save(str(output_path))
             wb.close()
@@ -373,6 +620,20 @@ class PayslipGenerator:
                 a2_val,
             )
             ws.cell(row=2, column=1, value=updated)
+
+    def _clear_error_strings(self, ws):
+        """
+        Clear Excel error strings from worksheet cells.
+        
+        When the template is created from a source file with formula errors,
+        paste-as-values converts those errors to error strings like '#NAME?',
+        '#N/A', etc. This method clears those strings.
+        """
+        error_strings = _EXCEL_ERROR_STRINGS
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.strip() in error_strings:
+                    cell.value = None
 
     def generate_batch(
         self, employees: List[Dict[str, Any]]
