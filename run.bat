@@ -6,12 +6,10 @@ REM Usage:
 REM   run.bat                    - Show interactive menu
 REM   run.bat --help             - Show help
 REM   run.bat <tool-name>        - Run a specific tool
-REM   run.bat <script-name>      - Run a specific script
 REM
 REM Examples:
 REM   run.bat                    (Shows menu)
 REM   run.bat payslip-phuclong   (Runs payslip-phuclong tool)
-REM   run.bat example_read_emails (Runs script from scripts/)
 REM ================================================================================================
 
 setlocal EnableDelayedExpansion
@@ -92,40 +90,18 @@ if !TOOL_COUNT! equ 0 (
 )
 
 echo.
-echo Available Scripts:
-echo.
-
-REM List available scripts
-set SCRIPT_COUNT=0
-if exist "scripts\" (
-    for %%F in (scripts\*.py) do (
-        set FILENAME=%%~nF
-        if not "!FILENAME:~0,2!"=="__" (
-            set /a SCRIPT_COUNT+=1
-            set /a DISPLAY_NUM=!TOOL_COUNT!+!SCRIPT_COUNT!
-            echo   [!DISPLAY_NUM!] !FILENAME!
-            set SCRIPT_!SCRIPT_COUNT!=!FILENAME!
-        )
-    )
-)
-
-if !SCRIPT_COUNT! equ 0 (
-    echo   No scripts found in scripts/ directory
-)
-
-echo.
 echo   [0] Exit
 echo.
 echo ============================================================================================
 echo.
 
-set /p CHOICE="Select an option (0-%DISPLAY_NUM%): "
+set /p CHOICE="Select an option (0-!TOOL_COUNT!): "
 
 if "!CHOICE!"=="0" goto cleanup_exit
 
 REM Validate choice
 set /a CHOICE_NUM=!CHOICE! 2>nul
-if !CHOICE_NUM! gtr %DISPLAY_NUM% (
+if !CHOICE_NUM! gtr !TOOL_COUNT! (
     echo Invalid choice!
     timeout /t 2 >nul
     goto show_menu
@@ -136,21 +112,12 @@ if !CHOICE_NUM! leq 0 (
     goto show_menu
 )
 
-REM Run selected tool or script
-if !CHOICE_NUM! leq !TOOL_COUNT! (
-    set TARGET=!TOOL_%CHOICE_NUM%!
-    echo.
-    echo Running tool: !TARGET!
-    echo.
-    python tools\!TARGET!\main.py
-) else (
-    set /a SCRIPT_IDX=!CHOICE_NUM!-!TOOL_COUNT!
-    set TARGET=!SCRIPT_%SCRIPT_IDX%!
-    echo.
-    echo Running script: !TARGET!
-    echo.
-    python scripts\!TARGET!.py
-)
+REM Run selected tool
+set TARGET=!TOOL_%CHOICE_NUM%!
+echo.
+echo Running tool: !TARGET!
+echo.
+python tools\!TARGET!\main.py
 
 echo.
 echo ============================================================================================
@@ -168,7 +135,6 @@ echo Usage:
 echo   run.bat                    Show interactive menu
 echo   run.bat --help             Show this help
 echo   run.bat ^<tool-name^>        Run a specific tool
-echo   run.bat ^<script-name^>      Run a specific script
 echo.
 echo Available Tools:
 if exist "tools\" (
@@ -179,20 +145,9 @@ if exist "tools\" (
     )
 )
 echo.
-echo Available Scripts:
-if exist "scripts\" (
-    for %%F in (scripts\*.py) do (
-        set FILENAME=%%~nF
-        if not "!FILENAME:~0,2!"=="__" (
-            echo   - %%~nF
-        )
-    )
-)
-echo.
 echo Examples:
 echo   run.bat                           (interactive menu)
 echo   run.bat payslip-phuclong          (run tool)
-echo   run.bat example_read_emails       (run script)
 echo.
 goto cleanup_exit
 
@@ -211,21 +166,11 @@ if exist "tools\%TARGET%\main.py" (
     goto cleanup_exit
 )
 
-REM Check if it's a script
-if exist "scripts\%TARGET%.py" (
-    echo.
-    echo Running script: %TARGET%
-    echo.
-    python scripts\%TARGET%.py !ARGS!
-    set EXIT_CODE=!ERRORLEVEL!
-    goto cleanup_exit
-)
-
 REM Target not found
 echo.
-echo ERROR: Tool or script '%TARGET%' not found!
+echo ERROR: Tool '%TARGET%' not found!
 echo.
-echo Run 'run.bat --help' to see available tools and scripts.
+echo Run 'run.bat --help' to see available tools.
 echo.
 set EXIT_CODE=1
 pause

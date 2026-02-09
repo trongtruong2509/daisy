@@ -212,6 +212,8 @@ __marimo__/
 
 # Prompts
 prompts
+excel-files
+excel-files-1
 
 # Environment files (contain sensitive configuration)
 .env

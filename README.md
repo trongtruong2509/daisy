@@ -1,404 +1,332 @@
 # Daisy Automation Platform
 
-A **production-grade Python foundation** for automating office work on Windows, with a primary focus on **Outlook email automation** and integrated automation tools.
+**Office automation tools for Windows - making repetitive tasks easier.**
 
-This project provides reusable modules for building reliable, safe email automation tools and a master launcher for managing multiple automation tools from a single shared virtual environment.
+This platform helps automate office tasks like generating documents, sending emails, and processing data. Everything runs on your computer using familiar tools like Excel and Outlook.
 
-## Features
+---
 
-### Core Foundation
-- **Outlook Email Operations**: Read, filter, save, and send emails via Outlook Desktop
-- **Multi-Account Support**: Work with multiple accounts in one Outlook profile
-- **Safety First**: Dry-run mode, duplicate prevention, comprehensive logging
-- **Extensible Parsing**: Foundation for extracting data from email content
-- **Resilient Design**: Retry logic, state tracking, crash recovery
-
-### Master Launcher System
-- **Single Shared Virtual Environment**: One setup for all tools
-- **Interactive Menu**: Easy access to all tools and scripts
-- **Direct Invocation**: Run specific tools from command line
-- **Auto-Discovery**: Automatically detects tools in `tools/` directory
-- **Simple for Non-Technical Users**: Double-click `.bat` files to run
+## What's Included
 
 ### Available Tools
-- **payslip-phuclong**: Automated payslip generation and email distribution
 
-## Target Environment
+- **Payslip Generator** (`payslip-phuclong`) - Automatically generates and emails monthly payslips to employees
+  - See [tools/payslip-phuclong-ecom/README.md](tools/payslip-phuclong-ecom/README.md) for detailed instructions
 
-- **OS**: Windows 10/11
-- **Python**: 3.9+
-- **Email Client**: Outlook Desktop (not web/O365 API)
-- **Permissions**: No admin rights required
-- **Distribution**: Git clone + Python scripts (no executables)
+### Built-in Features
 
-## Quick Start
+- **Easy to Use**: Interactive menus and simple commands
+- **Safe Testing**: Test mode available - won't send real emails until you're ready
+- **Resume Support**: If something stops, you can continue where you left off
+- **Activity Logs**: Every action is recorded for your reference
+- **No Duplicates**: Won't send the same email twice by accident
 
-### 1. Clone the Repository
+---
+
+## What You Need
+
+- **Computer**: Windows 10 or Windows 11
+- **Software**:
+  - Python 3.9 or newer ([Download here](https://www.python.org/downloads/))
+  - Microsoft Outlook (desktop app, not web version)
+  - Microsoft Excel (for payslip tool)
+- **Permissions**: Regular user account (no admin rights needed)
+
+---
+
+## Getting Started
+
+### Step 1: Download the Project
+
+If you have Git installed:
 
 ```bash
 git clone <repository-url>
 cd daisy
 ```
 
-### 2. Run Setup
+Or download as ZIP file and extract it to a folder.
+
+### Step 2: Run Setup
+
+Double-click `setup.bat` or open Command Prompt in the project folder and run:
 
 ```cmd
 setup.bat
 ```
 
-This will:
-- Create a Python virtual environment
-- Install dependencies
-- Create `.Tools
+**What this does:**
 
-**Interactive menu** (recommended for new users):
+- Checks if Python is installed
+- Installs required packages
+- Creates folders for logs and outputs
+- Creates a configuration file template
+
+**First-time setup takes 2-3 minutes.** You only need to do this once.
+
+**You'll see:**
+
+```
+Setting up Daisy Automation Platform...
+Creating virtual environment...
+Installing dependencies...
+Setup complete!
+```
+
+### Step 3: Configure Your Tool
+
+Each tool has its own settings. For the payslip tool, see [tools/payslip-phuclong-ecom/README.md](tools/payslip-phuclong-ecom/README.md) for configuration instructions.
+
+### Step 4: Run a Tool
+
+**Option 1: Interactive Menu** (Easiest)
+
+Double-click `run.bat` or run:
+
 ```cmd
 run.bat
 ```
 
-**Direct tool invocation**:
+You'll see a menu like this:
+
+```
+====================================================================
+ Daisy Automation Platform - Main Menu
+====================================================================
+
+Available Tools:
+
+  [1] payslip-phuclong
+
+  [0] Exit
+
+====================================================================
+
+Select an option (0-1):
+```
+
+Just type `1` and press Enter to run the payslip tool.
+
+**Option 2: Direct Command** (Faster if you know the tool name)
+
 ```cmd
 run.bat payslip-phuclong
 ```
 
-**Run example scripts**:
+**That's it!** The tool will guide you through the rest.
+
+---
+
+## Using the Master Script
+
+The `run.bat` file is your main entry point for all tools.
+
+### How to Use
+
+**Show interactive menu:**
+
 ```cmd
-run.bat example_read_emails
+run.bat
 ```
 
-**Get help**:
+**Run a specific tool directly:**
+
+```cmd
+run.bat payslip-phuclong
+```
+
+**Get help:**
+
 ```cmd
 run.bat --help
-```ini
-OUTLOOK_ACCOUNT=your.email@company.com
-DRY_RUN=true
 ```
 
-### 4. Run Example Script
+### What Happens When You Run It
 
-Make sure Outlook Desktop is running, then:
+1. The script activates the Python environment
+2. Shows you available tools (if no tool specified)
+3. Runs the tool you selected
+4. Closes Python environment when done
 
-```cmd
-run.bat example_read_emails
-```
+You don't need to understand what happens behind the scenes - just run the command and follow the prompts!
+
+---
+
+## Configuration
+
+### Main Configuration (`.env` file)
+
+The main `.env` file in the project root has general settings:
+
+| Setting      | What It Means                   | Options                             | Default    |
+| ------------ | ------------------------------- | ----------------------------------- | ---------- |
+| `DRY_RUN`    | Test mode - no real emails sent | `true` or `false`                   | `true`     |
+| `LOG_LEVEL`  | Amount of detail in logs        | `INFO`, `DEBUG`, `WARNING`, `ERROR` | `INFO`     |
+| `LOG_DIR`    | Where to save log files         | Any folder path                     | `./logs`   |
+| `OUTPUT_DIR` | Where to save results           | Any folder path                     | `./output` |
+
+**Note:** Most users don't need to change these settings. The defaults work fine.
+
+### Tool-Specific Configuration
+
+Each tool has its own `.env` file with settings specific to that tool.
+
+For the payslip tool, see [tools/payslip-phuclong-ecom/README.md](tools/payslip-phuclong-ecom/README.md) for configuration options.
+
+---
+
+## Understanding Test Mode (Dry Run)
+
+**Test mode (`DRY_RUN=true`) is very important!**
+
+When test mode is ON:
+
+- ✓ The tool runs normally
+- ✓ Shows you what it would do
+- ✓ Creates log files
+- ✗ **Does NOT send real emails**
+- ✗ **Does NOT modify files**
+
+**Always test with `DRY_RUN=true` first** to make sure everything works correctly!
+
+When you're ready to run for real:
+
+1. Open the `.env` file in the tool's folder
+2. Change `DRY_RUN=true` to `DRY_RUN=false`
+3. Save the file
+4. Run the tool again
+
+---
+
+## Troubleshooting
+
+### "Python is not recognized" error
+
+**Problem:** Python is not installed or not in PATH.
+
+**Solution:**
+
+1. Download Python from https://www.python.org/downloads/
+2. During installation, **check the box "Add Python to PATH"**
+3. Restart your computer
+4. Run `setup.bat` again
+
+### "setup.bat failed" error
+
+**Problem:** Something went wrong during setup.
+
+**Solution:**
+
+1. Close all command prompt windows
+2. Delete the `venv` folder in the project directory
+3. Run `setup.bat` again
+4. If it still fails, contact IT support
+
+### "Outlook not found" error
+
+**Problem:** Outlook desktop app is not running or not installed.
+
+**Solution:**
+
+1. Make sure Outlook **desktop app** is installed (not just web version)
+2. Open Outlook before running the tool
+3. Make sure you're logged into your account in Outlook
+
+### Tool runs but doesn't do anything
+
+**Problem:** Probably in test mode (dry run).
+
+**Solution:**
+
+1. Check if `DRY_RUN=true` in the tool's `.env` file
+2. Change to `DRY_RUN=false` when ready to run for real
+3. Check the log files in `logs/` folder for details
+
+### "Permission denied" errors
+
+**Problem:** The tool can't write files to the folder.
+
+**Solution:**
+
+1. Make sure you have write permissions to the project folder
+2. Don't run the tool from a network drive or read-only location
+3. Try moving the project to your Documents folder
+
+### Tool stops in the middle
+
+**Problem:** Something went wrong during processing.
+
+**Solution:**
+
+1. Check the log file in `logs/` folder for error messages
+2. Run the tool again - it can usually resume where it stopped
+3. If the same error happens again, note the error message and contact IT support
+
+---
+
+## Where to Find Things
+
+After running tools, you'll find:
+
+| What              | Where                        | Description                         |
+| ----------------- | ---------------------------- | ----------------------------------- |
+| **Log files**     | `logs/`                      | Detailed record of what happened    |
+| **Output files**  | `output/`                    | Results, PDFs, CSV reports          |
+| **State files**   | `state/` or `tools/*/state/` | Tracks progress (so you can resume) |
+| **Configuration** | `.env` files                 | Settings for each tool              |
+
+---
+
+## Getting Help
+
+### For Tool-Specific Questions
+
+Check the tool's README file:
+
+- Payslip tool: [tools/payslip-phuclong-ecom/README.md](tools/payslip-phuclong-ecom/README.md)
+
+### For Setup or Technical Issues
+
+1. Check the troubleshooting section above
+2. Look at the log files in `logs/` folder
+3. Contact IT support with:
+   - The error message
+   - What you were trying to do
+   - The log file from `logs/` folder
+
+---
 
 ## Project Structure
 
 ```
 daisy/
-├── venv/                    # Virtual environment (gitignored)
-├── core/                    # Core utilities
-│   ├── __init__.py
-│   ├── config.py            # Configuration management
-│   ├── logger.py            # Logging (file + console)
-│   ├── retry.py             # Retry with exponential backoff
-│   └── state.py             # State tracking for duplicates
-├── office/
-│   └── outlook/             # Outlook abstraction layer
-│       ├── __init__.py
-│       ├── client.py        # Email reading client
-│       ├── sender.py        # Email sending with safety
-│       ├── models.py        # Data models (Email, Filter, etc.)
-│       └── exceptions.py    # Custom exceptions
-├── parsing/                 # Email content parsing
-│   ├── __init__.py
-│   ├── base.py              # Parser interface
-│   ├── text.py              # Plain text parsing
-│   └── html.py              # HTML parsing
-├── tools/                   # Automation tools
-│   └── payslip-phuclong/    # Payslip generation tool
-│       ├── main.py          # Tool entry point
-│       ├── run.bat          # Tool wrapper
-│       ├── .env.example     # Tool configuration template
-│       └── README.md        # Tool documentation
-├── scripts/                 # Utility scripts
-│   ├── example_read_emails.py
-│   └── example_send_email.py
-├── docs/                    # Documentation
-│   └── venv-strategy.md     # Virtual environment strategy
-├── .env.example             # Root configuration template
-├── requirements.txt         # Shared Python dependencies
-├── setup.bat                # Master setup (creates venv)
-├── run.bat                  # Master launcher
-└── README.md                # This file
+├── run.bat                    # Main launcher - start here!
+├── setup.bat                  # Run once to set everything up
+├── .env                       # General settings
+├── requirements.txt           # List of required packages
+│
+├── tools/                     # All automation tools
+│   └── payslip-phuclong-ecom/ # Payslip generation tool
+│       ├── README.md          # Tool instructions
+│       ├── .env               # Tool settings
+│       └── ...                # Tool files
+│
+├── logs/                      # Activity logs (auto-created)
+├── output/                    # Results and generated files
+└── venv/                      # Python environment (auto-created)
 ```
 
-## Configuration
+---
 
-All configuration is via `.env` file. Copy `.env.example` to `.env` and adjust:
+## Important Notes
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OUTLOOK_ACCOUNT` | Email address to use | (required) |
-| `DRY_RUN` | Safety mode - no mutations | `true` |
-| `BATCH_SIZE` | Emails per batch | `50` |
-| `RETRY_COUNT` | Retries for failed operations | `3` |
-| `RETRY_DELAY_SECONDS` | Base retry delay | `2` |
-| `LOG_DIR` | Log file directory | `./logs` |
-| `OUTPUT_DIR` | Output file directory | `./output` |
-| `STATE_DIR` | State tracking directory | `./state` |
-| `LOG_LEVEL` | DEBUG, INFO, WARNING, ERROR | `INFO` |
+✓ **Always test in dry-run mode first** before sending real emails  
+✓ **Keep backups** of your Excel files before running tools  
+✓ **Check log files** if something doesn't work as expected  
+✓ **Don't delete the `venv` folder** - it's needed to run the tools  
+✓ **Read the tool's README** before using it for the first time
 
-## Master Launcher and Setup
+---
 
-### Setup Script (`setup.bat`)
-
-The setup script creates the virtual environment and installs all dependencies. It supports several options:
-
-**Standard setup** (first time):
-```cmd
-setup.bat
-```
-
-**Recreate virtual environment** (if corrupted):
-```cmd
-setup.bat --recreate
-```
-
-**Upgrade installed packages**:
-```cmd
-setup.bat --upgrade
-```
-
-The setup script will:
-1. Check Python 3.14+ is installed
-2. Create or update virtual environment
-3. Install all dependencies from `requirements.txt`
-4. Validate core modules
-5. Create `.env` from template if needed
-
-### Master Launcher (`run.bat`)
-
-The master launcher provides three ways to run tools:
-
-**1. Interactive Menu** (easiest for non-technical users):
-```cmd
-run.bat
-```
-This shows a numbered menu of all available tools and scripts.
-
-**2. Direct Tool Invocation** (fastest for regular users):
-```cmd
-run.bat payslip-phuclong
-run.bat example_read_emails
-```
-
-**3. Tool Wrapper** (from tool directory):
-```cmd
-cd tools\payslip-phuclong
-run.bat
-```
-
-The launcher automatically:
-- Activates the virtual environment
-- Discovers available tools in `tools/` directory
-- Discovers available scripts in `scripts/` directory
-- Handles errors gracefully
-- Deactivates virtual environment on exit
-
-## Safety Guarantees
-
-### Dry-Run Mode
-
-When `DRY_RUN=true` (default):
-
-- No emails are sent
-- No emails are modified
-- Logs show what *would* happen
-- State tracking still works (for testing)
-
-**Always test with dry-run before going live!**
-
-### Duplicate Prevention
-
-The state tracking system prevents:
-
-- Sending the same email twice
-- Processing the same email repeatedly
-
-State is persisted to JSON files and survives restarts.
-
-### Comprehensive Logging
-
-Every run creates a timestamped log file in `logs/`:
-
-- Console: Concise progress updates
-- File: Detailed audit trail
-- All operations are logged for traceability
-
-### Retry Logic
-
-Outlook COM operations are wrapped with:
-
-- Configurable retry attempts
-- Exponential backoff
-- Transient error detection
-- Clear logging of failures
-
-## Building Your Own Tools
-
-The foundation is designed for building custom automation tools.
-
-### Basic Pattern
-
-```python
-from core.config import load_config
-from core.logger import setup_logging, get_logger
-from core.state import StateTracker
-from office.outlook import OutlookClient, EmailFilter
-
-# Load configuration
-config = load_config()
-config.ensure_directories()
-
-# Set up logging
-setup_logging(log_dir=config.log_dir, level=config.log_level)
-logger = get_logger(__name__)
-
-# Initialize state tracking
-tracker = StateTracker(config.state_dir, "my_tool")
-
-# Use Outlook client
-with OutlookClient(account=config.outlook_account) as client:
-    emails = client.get_inbox_emails(
-        filter=EmailFilter(unread_only=True, limit=100)
-    )
-    
-    for email in emails:
-        if tracker.is_processed(email.unique_id):
-            continue
-            
-        # Your business logic here
-        process_email(email)
-        
-        tracker.mark_processed(email.unique_id)
-    
-    tracker.save()
-```
-
-### Sending Emails Safely
-
-```python
-from office.outlook import OutlookSender
-from office.outlook.models import NewEmail
-from core.state import ContentHashTracker
-
-tracker = ContentHashTracker(config.state_dir, "email_send")
-
-with OutlookSender(
-    account=config.outlook_account,
-    dry_run=config.dry_run,
-    state_tracker=tracker
-) as sender:
-    email = NewEmail(
-        to=["recipient@example.com"],
-        subject="Automated Email",
-        body="Hello from the automation system.",
-    )
-    
-    sender.send(email)  # Won't send duplicates
-```
-
-### Parsing Email Content
-
-```python
-from parsing import TextParser, HtmlParser
-
-# Plain text parsing
-text_parser = TextParser()
-result = text_parser.parse(email.body_text)
-print(result.data["key_values"])  # Extracted key-value pairs
-
-# HTML parsing
-html_parser = HtmlParser()
-result = html_parser.parse(email.body_html)
-print(result.data["text"])   # Plain text version
-print(result.data["tables"]) # Extracted tables
-```
-
-### Custom Parser
-
-```python
-from parsing.base import BaseParser, ParseResult
-import re
-
-class InvoiceParser(BaseParser):
-    def parse(self, content, **kwargs):
-        data = {}
-        
-        # Extract invoice number
-        match = re.search(r"Invoice #?(\d+)", content)
-        if match:
-            data["invoice_number"] = match.group(1)
-        
-        # Extract amount
-        match = re.search(r"\$[\d,]+\.?\d*", content)
-        if match:
-            data["amount"] = match.group(0)
-        
-        return ParseResult(
-            success=bool(data),
-            data=data,
-            raw_content=content
-        )
-```
-
-## What's NOT Included
-
-This foundation intentionally excludes:
-
-- Business-specific logic (HR workflows, payslip parsing)
-- GUI/interface
-- Meetings/calendar automation
-- Microsoft Graph API integration
-- Shared mailbox access
-- Executable packaging
-
-These should be built as separate tools on top of this foundation.
-
-## Troubleshooting
-
-### "Outlook not found" or connection errors
-
-- Ensure Outlook Desktop is running (not just Outlook web)
-- Check that your account is configured in Outlook
-- Try restarting Outlook
-
-### "Account not found"
-
-- Verify `OUTLOOK_ACCOUNT` matches exactly with your Outlook profile
-- Run the example script to see available accounts
-
-### Slow performance
-
-- Reduce `BATCH_SIZE` in `.env`
-- Use more specific filters
-- Large mailboxes are inherently slow via COM
-
-### Permission errors
-
-- Don't run as administrator
-- Ensure the script has read/write access to project directories
-
-## Dependencies
-
-- `pywin32` - Windows COM automation
-- `python-dotenv` - Environment configuration
-- `openpyxl` - Excel file handling
-- `pandas` - Data manipulation
-- `beautifulsoup4` - HTML parsing
-- `PyYAML` - YAML support
-
-## Contributing
-
-When adding new features:
-
-1. Follow the existing architecture patterns
-2. Add proper logging
-3. Support dry-run mode for mutations
-4. Write docstrings and comments
-5. Update this README if needed
-
-## License
-
-Internal use only. Not for distribution.
+**Last Updated:** February 2026  
+**Internal use only. Not for distribution.**
