@@ -684,3 +684,47 @@ class OutlookClient:
                 logger.warning(f"Failed to save attachment {attachment.filename}: {e}")
         
         return saved
+
+
+# ── Standalone Utility Functions ────────────────────────────────
+
+def get_outlook_accounts() -> List[str]:
+    """
+    Get list of configured Outlook accounts via COM.
+
+    Standalone function — does not require an OutlookClient instance.
+    Opens a temporary COM connection, reads SMTP addresses, and closes.
+
+    Returns:
+        List of email addresses (deduplicated, order-preserved),
+        or empty list if Outlook is unavailable.
+    """
+    if not HAS_WIN32COM:
+        logger.debug("win32com not available — cannot retrieve Outlook accounts")
+        return []
+
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        ns = outlook.GetNamespace("MAPI")
+
+        accounts = []
+        for i in range(1, ns.Accounts.Count + 1):
+            account = ns.Accounts.Item(i)
+            email = getattr(account, "SmtpAddress", "")
+            if email:
+                accounts.append(email)
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique = []
+        for email in accounts:
+            if email not in seen:
+                unique.append(email)
+                seen.add(email)
+
+        logger.debug(f"Found {len(unique)} Outlook accounts")
+        return unique
+
+    except Exception as e:
+        logger.warning(f"Could not retrieve Outlook accounts: {e}")
+        return []

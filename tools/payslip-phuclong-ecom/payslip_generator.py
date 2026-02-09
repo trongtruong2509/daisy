@@ -14,23 +14,15 @@ correct values regardless of formula complexity (VLOOKUP, XLOOKUP, etc.).
 """
 
 import gc
-import logging
 import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from core.logger import get_logger
+from office.excel.utils import xlookup_to_index_match, fix_xlookup_formulas, XLOOKUP_PATTERN
 
-# Regex to replace _xlfn.XLOOKUP(lookup, search_range, result_range)
-# with INDEX(result_range, MATCH(lookup, search_range, 0))
-_XLOOKUP_PATTERN = re.compile(
-    r"_xlfn\.XLOOKUP\("
-    r"([^,]+),"       # lookup_value
-    r"([^,]+),"       # search_range
-    r"([^,\)]+)"      # result_range
-    r"\)"
-)
+logger = get_logger(__name__)
 
 
 class PayslipGenerator:
@@ -318,21 +310,9 @@ class PayslipGenerator:
         Replace _xlfn.XLOOKUP(lookup, search, result) with
         INDEX(result, MATCH(lookup+0, search, 0)) in a formula string.
 
-        The +0 forces type coercion (text→number) so MATCH works
-        when lookup is text but search column contains numbers.
-
-        Handles multiple XLOOKUP calls in the same formula,
-        e.g. =XLOOKUP(A,B,C) + XLOOKUP(A,B,D)
-        Also handles wrapping functions like =UPPER(XLOOKUP(...))
-        and arithmetic like =XLOOKUP(...)/8*10
+        Delegates to office.excel.utils.xlookup_to_index_match.
         """
-        def _replacer(m):
-            lookup = m.group(1)
-            search = m.group(2)
-            result = m.group(3)
-            return f"INDEX({result},MATCH({lookup}+0,{search},0))"
-
-        return _XLOOKUP_PATTERN.sub(_replacer, formula)
+        return xlookup_to_index_match(formula)
 
     def _fix_xlookup_formulas(self, wb, data_sheet: str):
         """
@@ -340,30 +320,7 @@ class PayslipGenerator:
         INDEX/MATCH equivalents so they work in Excel versions that
         don't support XLOOKUP (e.g., Excel 2016).
 
-        Only modifies formulas containing '_xlfn.XLOOKUP'.
-        Does NOT save the workbook (changes are in-memory only).
+        Delegates to office.excel.utils.fix_xlookup_formulas.
         """
         ws = wb.Sheets(data_sheet)
-        used = ws.UsedRange
-        row_count = used.Rows.Count
-        col_count = used.Columns.Count
-        start_row = used.Row
-        start_col = used.Column
-        fixed_count = 0
-
-        for r in range(start_row, start_row + row_count):
-            for c in range(start_col, start_col + col_count):
-                cell = ws.Cells(r, c)
-                formula = cell.Formula
-                if formula and isinstance(formula, str) and "_xlfn.XLOOKUP" in formula:
-                    new_formula = self._xlookup_to_index_match(formula)
-                    cell.Formula = new_formula
-                    fixed_count += 1
-
-        if fixed_count > 0:
-            logger.info(
-                f"Replaced {fixed_count} XLOOKUP formulas with INDEX/MATCH "
-                f"in '{data_sheet}' sheet"
-            )
-        else:
-            logger.debug(f"No XLOOKUP formulas found in '{data_sheet}' sheet")
+        fix_xlookup_formulas(ws, logger=logger)

@@ -8,214 +8,70 @@ This variant uses Excel COM for all formula evaluation, so it does NOT need
 TBKQ cell-to-Data column mappings or calculated cell formulas.
 """
 
-import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from dotenv import load_dotenv, set_key
+# Add project root to path for foundation imports
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-
-RESET = "\033[0m"
-
-def _print_with_color(text: str, color_code: int = 92):
-    """Print text with ANSI color codes."""
-    print(f"\033[{color_code}m{text}{RESET}")
-
-def _str_to_bool(value: str) -> bool:
-    """Convert string to boolean."""
-    if not value:
-        return False
-    return value.strip().lower() in ("true", "1", "yes", "on")
-
-
-def _parse_cell_list(value: str) -> List[str]:
-    """Parse comma-separated cell references like 'A1,A3,A5'."""
-    if not value:
-        return []
-    return [c.strip() for c in value.split(",") if c.strip()]
-
-
-def _prompt_for_value(
-    key: str,
-    description: str,
-    example: str = "",
-    validator=None,
-) -> str:
-    """
-    Prompt user for a configuration value with optional validation.
-    
-    Args:
-        key: Config key name
-        description: User-facing description
-        example: Example value to show
-        validator: Optional callable(value) -> (is_valid: bool, error_msg: str)
-                  Returns tuple of (is_valid, error_message)
-    """
-    _print_with_color(f"{description}", 33)
-    if example:
-        print(f"Example: {example}")
-    while True:
-        value = input(f"{key}: ").strip()
-        if not value:
-            print("Value cannot be empty. Please try again.")
-            continue
-        
-        # Validate if validator provided
-        if validator:
-            is_valid, error_msg = validator(value)
-            if not is_valid:
-                print(f"❌ Invalid input: {error_msg}")
-                continue
-        
-        return value
-
-
-def _save_to_env(env_file: Path, key: str, value: str) -> None:
-    """Save a key-value pair to .env file."""
-    try:
-        set_key(str(env_file), key, value)
-        print(f"  Saved {key} to .env file")
-    except Exception as e:
-        print(f"  Warning: Could not save to .env: {e}")
-
-
-# ── Validation Functions ────────────────────────────────────
-
-def _validate_date_format(value: str) -> tuple:
-    """Validate DATE format (MM/YYYY with valid month 1-12)."""
-    if not re.match(r"^\d{2}/\d{4}$", value):
-        return False, "Expected format: MM/YYYY (e.g., 01/2026)"
-    
-    try:
-        month = int(value[:2])
-        if month < 1 or month > 12:
-            return False, f"Month must be 01-12, got {month}"
-    except ValueError:
-        return False, "Invalid month value"
-    
-    return True, ""
-
-
-def _validate_email_format(value: str) -> tuple:
-    """Validate email format."""
-    email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    if not re.match(email_pattern, value):
-        return False, "Invalid email format (e.g., user@company.com)"
-    return True, ""
-
-
-def _validate_file_path(value: str, tool_dir: Path) -> tuple:
-    """Validate file path exists."""
-    file_path = Path(value)
-    
-    # Make relative paths relative to tool_dir
-    if not file_path.is_absolute():
-        file_path = tool_dir / file_path
-    
-    if not file_path.exists():
-        return False, f"File not found: {file_path}"
-    
-    if not file_path.is_file():
-        return False, f"Path is not a file: {file_path}"
-    
-    return True, ""
+from core.config_manager import ConfigManager
+from core.console import cprint
+from office.outlook import get_outlook_accounts
 
 
 # ── Outlook Account Functions ───────────────────────────────
 
-def _get_outlook_accounts() -> List[str]:
-    """
-    Get list of configured accounts from Outlook COM.
-    
-    Returns:
-        List of email addresses, or empty list if Outlook not available.
-    """
-    accounts = []
-    try:
-        import win32com.client
-        
-        outlook = win32com.client.Dispatch("Outlook.Application")
-        ns = outlook.GetNamespace("MAPI")
-        
-        # Iterate accounts using indexed access (same as sender.py)
-        # to ensure consistent ordering
-        for i in range(1, ns.Accounts.Count + 1):
-            account = ns.Accounts.Item(i)
-            email = getattr(account, "SmtpAddress", "")
-            if email:
-                accounts.append(email)
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_accounts = []
-        for email in accounts:
-            if email not in seen:
-                unique_accounts.append(email)
-                seen.add(email)
-        
-        return unique_accounts
-    
-    except Exception as e:
-        # Outlook not available or error occurred
-        _print_with_color(f"  Note: Could not retrieve Outlook accounts: {e}", 31)
-        return []
-
-
 def _prompt_for_outlook_account() -> str:
     """
     Prompt user to select Outlook account from configured profiles.
-    
+
+    Uses get_outlook_accounts() from office.outlook module.
     If no accounts found, falls back to manual email entry.
-    
+
     Returns:
         Selected or entered email address.
     """
-    accounts = _get_outlook_accounts()
-    
+    accounts = get_outlook_accounts()
+
+    print()
     if not accounts:
         # Fallback: ask user to manually enter email
-        print("\nOutlook account")
-        validator = _validate_email_format
-    else:
-        # Show menu of available accounts
-        print("\nOutlook account")
-        for i, account in enumerate(accounts, 1):
-            print(f"  [{i}] {account}")
-        
-        # Prompt for selection
-        while True:
-            try:
-                choice = input("  → Selected: ").strip()
-                if not choice:
-                    print("  Selection cannot be empty. Please try again.")
-                    continue
-                
-                choice_num = int(choice)
-                if 1 <= choice_num <= len(accounts):
-                    return accounts[choice_num - 1]
-                else:
-                    print(f"  \033[91m✗ Invalid selection. Please enter 1-{len(accounts)}\033[0m")
-                    continue
-                    
-            except ValueError:
-                print("  \033[91m✗ Please enter a valid number.\033[0m")
-                continue
-    
-    # Manual entry fallback
+        cprint("Choose Outlook accounts", level="WARNING")
+        return ConfigManager.prompt_for_value(
+            "OUTLOOK_ACCOUNT",
+            "No Outlook accounts detected. Enter email manually.",
+            "user@company.com",
+            validator=ConfigManager.validate_email,
+        )
+
+    # Show menu of available accounts
+    cprint("Choose Outlook accounts", level="WARNING")
+    for i, account in enumerate(accounts, 1):
+        print(f"  [{i}] {account}")
+
+    # Prompt for selection
     while True:
-        value = input("  → ").strip()
-        if not value:
-            print("  Value cannot be empty. Please try again.")
+        try:
+            choice = input("\u2192 Selected: ").strip()
+            if not choice:
+                print("  Selection cannot be empty. Please try again.")
+                continue
+
+            choice_num = int(choice)
+            if 1 <= choice_num <= len(accounts):
+                return accounts[choice_num - 1]
+            else:
+                cprint(f"Invalid selection. Please enter 1-{len(accounts)}", level="ERROR")
+                continue
+
+        except ValueError:
+            cprint("Please enter a valid number.", level="ERROR")
             continue
-        
-        is_valid, error_msg = _validate_email_format(value)
-        if not is_valid:
-            print(f"  \033[91m✗ Invalid input: {error_msg}\033[0m")
-            continue
-        
-        return value
 
 
 @dataclass
@@ -263,6 +119,7 @@ class PayslipConfig:
     pdf_password_enabled: bool = True
     pdf_password_strip_zeros: bool = True
     pdf_filename_pattern: str = "TBKQ_{name}_{mmyyyy}"
+    keep_pdf_payslips: bool = False
 
     # Output paths
     output_dir: Path = field(default_factory=lambda: Path("./output"))
@@ -338,94 +195,84 @@ def load_config(
     if global_env is None:
         global_env = Path(__file__).resolve().parent.parent.parent / ".env"
 
-    # Load global .env first (lower priority)
-    if global_env.exists():
-        load_dotenv(global_env, override=False)
+    # Load .env files with priority ordering via ConfigManager
+    mgr = ConfigManager()
+    mgr.load_env([global_env, tool_dir / ".env"])
 
-    # Load local .env (higher priority, overrides global)
-    local_env = tool_dir / ".env"
-    if local_env.exists():
-        load_dotenv(local_env, override=True)
-
-    # Handle Excel path - make it relative to tool directory if relative
-    excel_path_str = os.getenv("PAYSLIP_EXCEL_PATH", "")
-    excel_path = Path(excel_path_str)
-    if excel_path_str and not excel_path.is_absolute():
-        excel_path = tool_dir / excel_path
-
+    # Build config using ConfigManager typed getters
     config = PayslipConfig(
-        excel_path=excel_path,
-        data_sheet=os.getenv("DATA_SHEET", "Data"),
-        template_sheet=os.getenv("TEMPLATE_SHEET", "TBKQ"),
-        email_body_sheet=os.getenv("EMAIL_BODY_SHEET", "bodymail"),
-        data_header_row=int(os.getenv("DATA_HEADER_ROW", "2")),
-        data_start_row=int(os.getenv("DATA_START_ROW", "4")),
-        col_mnv=os.getenv("DATA_COLUMN_MNV", "A"),
-        col_name=os.getenv("DATA_COLUMN_NAME", "B"),
-        col_email=os.getenv("DATA_COLUMN_EMAIL", "C"),
-        col_password=os.getenv("DATA_COLUMN_PASSWORD", "AZ"),
-        email_subject=os.getenv("EMAIL_SUBJECT", ""),
-        email_subject_cell=os.getenv("EMAIL_SUBJECT_CELL", "G1"),
-        email_body_cells=_parse_cell_list(
-            os.getenv("EMAIL_BODY_CELLS", "A1,A3,A5,A7,A9,A11,A12")
+        excel_path=mgr.get_path("PAYSLIP_EXCEL_PATH", base_dir=tool_dir),
+        data_sheet=mgr.get("DATA_SHEET", "Data"),
+        template_sheet=mgr.get("TEMPLATE_SHEET", "TBKQ"),
+        email_body_sheet=mgr.get("EMAIL_BODY_SHEET", "bodymail"),
+        data_header_row=mgr.get_int("DATA_HEADER_ROW", 2),
+        data_start_row=mgr.get_int("DATA_START_ROW", 4),
+        col_mnv=mgr.get("DATA_COLUMN_MNV", "A"),
+        col_name=mgr.get("DATA_COLUMN_NAME", "B"),
+        col_email=mgr.get("DATA_COLUMN_EMAIL", "C"),
+        col_password=mgr.get("DATA_COLUMN_PASSWORD", "AZ"),
+        email_subject=mgr.get("EMAIL_SUBJECT", ""),
+        email_subject_cell=mgr.get("EMAIL_SUBJECT_CELL", "G1"),
+        email_body_cells=mgr.get_list(
+            "EMAIL_BODY_CELLS", default=["A1", "A3", "A5", "A7", "A9", "A11", "A12"]
         ),
-        email_date_cell=os.getenv("EMAIL_DATE_CELL", "A3"),
-        date=os.getenv("DATE", ""),
-        outlook_account=os.getenv("OUTLOOK_ACCOUNT", ""),
-        dry_run=_str_to_bool(os.getenv("DRY_RUN", "true")),
-        batch_size=int(os.getenv("BATCH_SIZE", "50")),
-        allow_duplicate_emails=_str_to_bool(os.getenv("ALLOW_DUPLICATE_EMAILS", "false")),
-        pdf_password_enabled=_str_to_bool(os.getenv("PDF_PASSWORD_ENABLED", "true")),
-        pdf_password_strip_zeros=_str_to_bool(
-            os.getenv("PDF_PASSWORD_STRIP_LEADING_ZEROS", "true")
-        ),
-        pdf_filename_pattern=os.getenv("PDF_FILENAME_PATTERN", "TBKQ_{name}_{mmyyyy}"),
-        output_dir=tool_dir / Path(os.getenv("OUTPUT_DIR", "./output")),
-        log_dir=tool_dir / Path(os.getenv("LOG_DIR", "./logs")),
-        state_dir=tool_dir / Path(os.getenv("STATE_DIR", "./state")),
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        email_date_cell=mgr.get("EMAIL_DATE_CELL", "A3"),
+        date=mgr.get("DATE", ""),
+        outlook_account=mgr.get("OUTLOOK_ACCOUNT", ""),
+        dry_run=mgr.get_bool("DRY_RUN", True),
+        batch_size=mgr.get_int("BATCH_SIZE", 50),
+        allow_duplicate_emails=mgr.get_bool("ALLOW_DUPLICATE_EMAILS", False),
+        pdf_password_enabled=mgr.get_bool("PDF_PASSWORD_ENABLED", True),
+        pdf_password_strip_zeros=mgr.get_bool("PDF_PASSWORD_STRIP_LEADING_ZEROS", True),
+        pdf_filename_pattern=mgr.get("PDF_FILENAME_PATTERN", "TBKQ_{name}_{mmyyyy}"),
+        keep_pdf_payslips=mgr.get_bool("KEEP_PDF_PAYSLIPS", False),
+        output_dir=tool_dir / Path(mgr.get("OUTPUT_DIR", "./output")),
+        log_dir=tool_dir / Path(mgr.get("LOG_DIR", "./logs")),
+        state_dir=tool_dir / Path(mgr.get("STATE_DIR", "./state")),
+        log_level=mgr.get("LOG_LEVEL", "INFO"),
     )
 
     # Prompt for missing critical values
     local_env = tool_dir / ".env"
-    
+
     # Check if any prompts are needed
     needs_prompt = (
         (not config.excel_path or not config.excel_path.exists()) or
         not config.date or
         not config.outlook_account
     )
-    
+
     if needs_prompt:
-        print("\n\033[96m▶  Configuration\033[0m")
+        cprint("Configuration", level="PHASE")
         print()
 
     if not config.excel_path or not config.excel_path.exists():
-        excel_path_str = _prompt_for_value(
+        excel_path_str = mgr.prompt_for_value(
             "PAYSLIP_EXCEL_PATH",
             "Excel file path not found or invalid.",
             "../../excel-files/TBKQ-phuclong.xls",
-            validator=lambda v: _validate_file_path(v, tool_dir)
+            validator=lambda v: ConfigManager.validate_file_path(v, tool_dir),
         )
         excel_path = Path(excel_path_str)
         if not excel_path.is_absolute():
             excel_path = tool_dir / excel_path
         config.excel_path = excel_path
-        # _save_to_env(local_env, "PAYSLIP_EXCEL_PATH", excel_path_str)
 
     if not config.date:
-        date_str = _prompt_for_value(
+        date_str = mgr.prompt_for_value(
             "DATE",
-            "Payroll date (MM/YYYY)",
-            "Example: 01/2026",
-            validator=_validate_date_format
+            "Set Payroll Date (MM/YYYY)",
+            "01/2026",
+            validator=ConfigManager.validate_date,
         )
         config.date = date_str
-        # _save_to_env(local_env, "DATE", date_str)
 
     if not config.outlook_account:
         outlook_account = _prompt_for_outlook_account()
         config.outlook_account = outlook_account
-        # _save_to_env(local_env, "OUTLOOK_ACCOUNT", outlook_account)
+
+    # Restructure output_dir to include date-based subfolder: output/<MMYYYY>/
+    if config.date:
+        config.output_dir = config.output_dir / config.date_mmyyyy
 
     return config

@@ -23,6 +23,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# ── Custom CONSOLE logging level ────────────────────────────────
+# Between INFO(20) and WARNING(30), used for user-facing console output
+# that should always be logged to file for traceability.
+CONSOLE = 25
+logging.addLevelName(CONSOLE, "CONSOLE")
+
+
+def _console_log(self, message, *args, **kwargs):
+    """Log a message at CONSOLE level (25)."""
+    if self.isEnabledFor(CONSOLE):
+        self._log(CONSOLE, message, args, **kwargs)
+
+
+# Attach console() method to all Logger instances
+logging.Logger.console = _console_log
+
+
 # Global state for the logging system
 _logging_initialized = False
 _log_file_path: Optional[Path] = None
@@ -40,6 +57,7 @@ class ConsoleFormatter(logging.Formatter):
     COLORS = {
         logging.DEBUG: "\033[36m",     # Cyan
         logging.INFO: "\033[32m",       # Green
+        CONSOLE: "\033[37m",            # White (console output)
         logging.WARNING: "\033[33m",    # Yellow
         logging.ERROR: "\033[31m",      # Red
         logging.CRITICAL: "\033[35m",   # Magenta
@@ -55,6 +73,7 @@ class ConsoleFormatter(logging.Formatter):
         level_prefixes = {
             logging.DEBUG: "[DEBUG]",
             logging.INFO: "[*]",
+            CONSOLE: "[>]",
             logging.WARNING: "[!]",
             logging.ERROR: "[ERROR]",
             logging.CRITICAL: "[CRITICAL]",
@@ -159,6 +178,9 @@ def setup_logging(
     console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(console_log_level)
     console_handler.setFormatter(ConsoleFormatter(use_colors=True))
+    # Suppress CONSOLE-level messages from the logging console handler
+    # because cprint() already prints them directly to stdout.
+    console_handler.addFilter(lambda record: record.levelno != CONSOLE)
     root_logger.addHandler(console_handler)
     
     _logging_initialized = True

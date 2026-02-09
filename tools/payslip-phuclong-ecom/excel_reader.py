@@ -1,94 +1,41 @@
 """
 Excel reader for payslip data (Excel COM variant).
 
-Uses Excel COM to read employee data from the Data sheet. Since all formula
-evaluation is handled by Excel COM during payslip generation, this reader
-only needs to extract employee metadata (MNV, Name, Email, Password).
+Uses the generic ExcelComReader from office.excel as its foundation,
+adding payslip-specific logic for employee metadata extraction and
+name fallback from the 'bang luong' sheet.
 """
 
-import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+from core.logger import get_logger
+from office.excel.reader import ExcelComReader
+from office.excel.utils import col_letter_to_index, safe_cell_value, normalize_numeric_string
 
-
-def _col_letter_to_index(col: str) -> int:
-    """Convert column letter to 1-based index. A=1, B=2, ..., AZ=52."""
-    result = 0
-    for ch in col.upper():
-        result = result * 26 + (ord(ch) - ord("A") + 1)
-    return result
+logger = get_logger(__name__)
 
 
 class ExcelReader:
     """
     Reads employee metadata and email template from an Excel file via COM.
 
-    Only reads MNV, Name, Email, Password from the Data sheet, and the
-    email template from the bodymail sheet. All formula-dependent values
-    are resolved by Excel COM during payslip generation.
-
-    If Data sheet formulas return errors (XLOOKUP not supported), falls
-    back to reading Name from the 'bang luong' sheet.
+    Wraps the generic ExcelComReader with payslip-specific logic:
+    - Employee data extraction (MNV, Name, Email, Password)
+    - Name fallback from 'bang luong' sheet when XLOOKUP fails
+    - Email template reading from bodymail sheet
     """
 
-    # COM error integer values
-    _COM_ERROR_VALUES = {
-        -2146826281,  # #DIV/0!
-        -2146826246,  # #N/A
-        -2146826259,  # #NAME?
-        -2146826288,  # #NULL!
-        -2146826252,  # #NUM!
-        -2146826265,  # #REF!
-        -2146826273,  # #VALUE!
-    }
-
     def __init__(self, excel_path: Path):
-        self.excel_path = Path(excel_path).resolve()
-        if not self.excel_path.exists():
-            raise FileNotFoundError(f"Excel file not found: {self.excel_path}")
-
-        self._excel = None
-        self._workbook = None
+        self._reader = ExcelComReader(excel_path)
 
     def open(self):
         """Open the Excel workbook via COM with formula recalculation."""
-        import win32com.client as win32
-
-        self._excel = win32.Dispatch("Excel.Application")
-        self._excel.Visible = False
-        self._excel.DisplayAlerts = False
-
-        self._workbook = self._excel.Workbooks.Open(
-            str(self.excel_path),
-            ReadOnly=True,
-            UpdateLinks=0,
-        )
-
-        # Force full recalculation so all formulas (VLOOKUP, XLOOKUP) resolve
-        try:
-            self._excel.Calculation = -4105  # xlCalculationAutomatic
-            self._workbook.Application.CalculateFull()
-        except Exception as e:
-            logger.warning(f"Formula recalculation warning: {e}")
-
-        logger.info(f"Opened Excel file via COM: {self.excel_path}")
+        self._reader.open(read_only=True, recalculate=True)
 
     def close(self):
         """Close the workbook and Excel COM."""
-        if self._workbook:
-            try:
-                self._workbook.Close(SaveChanges=False)
-            except Exception:
-                pass
-        if self._excel:
-            try:
-                self._excel.Quit()
-            except Exception:
-                pass
-        self._excel = None
-        self._workbook = None
+        self._reader.close()
 
     def __enter__(self):
         self.open()
@@ -126,10 +73,10 @@ class ExcelReader:
         Returns:
             List of employee dicts with keys: row, mnv, name, email, password.
         """
-        ws = self._workbook.Sheets(data_sheet)
+        ws = self._reader.get_sheet(data_sheet)
 
         # Find last row with data in MNV column
-        mnv_col_idx = _col_letter_to_index(col_mnv)
+        mnv_col_idx = col_letter_to_index(col_mnv)
         last_row = ws.Cells(ws.Rows.Count, mnv_col_idx).End(-4162).Row  # xlUp
 
         logger.info(
@@ -143,16 +90,16 @@ class ExcelReader:
             if mnv_val is None or str(mnv_val).strip() == "":
                 continue
 
-            name_val = self._safe_value(ws.Range(f"{col_name}{r}").Value)
-            email_val = self._safe_value(ws.Range(f"{col_email}{r}").Value)
-            pw_val = self._safe_value(ws.Range(f"{col_password}{r}").Value)
+            name_val = safe_cell_value(ws.Range(f"{col_name}{r}").Value)
+            email_val = safe_cell_value(ws.Range(f"{col_email}{r}").Value)
+            pw_val = safe_cell_value(ws.Range(f"{col_password}{r}").Value)
 
             emp = {
                 "row": r,
-                "mnv": self._normalize_mnv(mnv_val),
+                "mnv": normalize_numeric_string(mnv_val),
                 "name": str(name_val).strip() if name_val else "",
                 "email": str(email_val).strip() if email_val else "",
-                "password": self._normalize_password(pw_val),
+                "password": normalize_numeric_string(pw_val),
             }
             employees.append(emp)
 
@@ -164,9 +111,7 @@ class ExcelReader:
 
     def _safe_value(self, value) -> Any:
         """Return None for COM error values, otherwise return as-is."""
-        if isinstance(value, int) and value in self._COM_ERROR_VALUES:
-            return None
-        return value
+        return safe_cell_value(value)
 
     def _fill_missing_names(self, employees: List[Dict[str, Any]]):
         """
@@ -185,7 +130,7 @@ class ExcelReader:
         )
 
         try:
-            bl_ws = self._workbook.Sheets("bang luong")
+            bl_ws = self._reader.get_sheet("bang luong")
         except Exception:
             logger.warning("Could not access 'bang luong' sheet for name lookup")
             return
@@ -198,7 +143,7 @@ class ExcelReader:
             bl_mnv = bl_ws.Cells(r, 12).Value  # Column L
             bl_name = bl_ws.Cells(r, 13).Value  # Column M
             if bl_mnv is not None:
-                mnv_str = self._normalize_mnv(bl_mnv)
+                mnv_str = normalize_numeric_string(bl_mnv)
                 if bl_name and isinstance(bl_name, str) and len(bl_name.strip()) >= 2:
                     mnv_name_map[mnv_str] = bl_name.strip()
 
@@ -227,7 +172,7 @@ class ExcelReader:
         Returns:
             Dict with cell reference -> value mapping.
         """
-        ws = self._workbook.Sheets(sheet_name)
+        ws = self._reader.get_sheet(sheet_name)
         template = {}
         for cell_ref in body_cells:
             val = ws.Range(cell_ref).Value
@@ -243,7 +188,7 @@ class ExcelReader:
         self, sheet_name: str, subject_cell: str
     ) -> str:
         """Read email subject from the TBKQ sheet."""
-        ws = self._workbook.Sheets(sheet_name)
+        ws = self._reader.get_sheet(sheet_name)
         val = ws.Range(subject_cell).Value
         subject = str(val) if val else ""
         logger.info(f"Email subject from {sheet_name}!{subject_cell}: {subject}")
@@ -252,15 +197,9 @@ class ExcelReader:
     @staticmethod
     def _normalize_mnv(value) -> str:
         """Normalize MNV to string, strip leading zeros."""
-        if isinstance(value, float):
-            value = int(value)
-        return str(value).strip().lstrip("0") or "0"
+        return normalize_numeric_string(value)
 
     @staticmethod
     def _normalize_password(value) -> str:
         """Normalize password to string, strip leading zeros."""
-        if value is None:
-            return ""
-        if isinstance(value, float):
-            value = int(value)
-        return str(value).strip().lstrip("0") or "0"
+        return normalize_numeric_string(value)

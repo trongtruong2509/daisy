@@ -5,12 +5,13 @@ Validates employee data before payslip generation or email sending.
 Follows fail-fast approach: if any issues are found, processing terminates.
 """
 
-import logging
 import re
 from collections import Counter
 from typing import Any, Dict, List, Tuple
 
-logger = logging.getLogger(__name__)
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 EMAIL_PATTERN = re.compile(
     r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"

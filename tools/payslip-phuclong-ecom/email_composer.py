@@ -5,12 +5,13 @@ Builds personalized HTML emails from the bodymail template,
 matching the VBA format for consistency.
 """
 
-import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class EmailComposer:

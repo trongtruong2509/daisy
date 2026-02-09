@@ -12,36 +12,11 @@ Usage:
     print(config.dry_run)
 """
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
-
-
-def _get_project_root() -> Path:
-    """Get the project root directory (where .env should be)."""
-    # Walk up from this file to find the project root
-    current = Path(__file__).resolve().parent.parent
-    return current
-
-
-def _str_to_bool(value: str) -> bool:
-    """Convert string to boolean, handling common truthy/falsy values."""
-    if value is None:
-        return False
-    return value.lower() in ("true", "1", "yes", "on")
-
-
-def _str_to_int(value: str, default: int) -> int:
-    """Convert string to integer with a default fallback."""
-    if value is None or value.strip() == "":
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
+from core.config_manager import ConfigManager
 
 
 @dataclass
@@ -157,23 +132,24 @@ def load_config(env_file: Optional[Path] = None) -> Config:
     """
     # Determine .env file location
     if env_file is None:
-        env_file = _get_project_root() / ".env"
+        project_root = Path(__file__).resolve().parent.parent
+        env_file = project_root / ".env"
     
-    # Load .env file if it exists
-    if env_file.exists():
-        load_dotenv(env_file)
+    # Load .env file via ConfigManager
+    mgr = ConfigManager()
+    mgr.load_env([env_file])
     
-    # Build config from environment variables
+    # Build config using ConfigManager typed getters
     config = Config(
-        outlook_account=os.getenv("OUTLOOK_ACCOUNT", ""),
-        dry_run=_str_to_bool(os.getenv("DRY_RUN", "true")),
-        batch_size=_str_to_int(os.getenv("BATCH_SIZE", ""), 50),
-        retry_count=_str_to_int(os.getenv("RETRY_COUNT", ""), 3),
-        retry_delay_seconds=_str_to_int(os.getenv("RETRY_DELAY_SECONDS", ""), 2),
-        log_dir=Path(os.getenv("LOG_DIR", "./logs")),
-        output_dir=Path(os.getenv("OUTPUT_DIR", "./output")),
-        state_dir=Path(os.getenv("STATE_DIR", "./state")),
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        outlook_account=mgr.get("OUTLOOK_ACCOUNT", ""),
+        dry_run=mgr.get_bool("DRY_RUN", True),
+        batch_size=mgr.get_int("BATCH_SIZE", 50),
+        retry_count=mgr.get_int("RETRY_COUNT", 3),
+        retry_delay_seconds=mgr.get_int("RETRY_DELAY_SECONDS", 2),
+        log_dir=Path(mgr.get("LOG_DIR", "./logs")),
+        output_dir=Path(mgr.get("OUTPUT_DIR", "./output")),
+        state_dir=Path(mgr.get("STATE_DIR", "./state")),
+        log_level=mgr.get("LOG_LEVEL", "INFO"),
     )
     
     return config
