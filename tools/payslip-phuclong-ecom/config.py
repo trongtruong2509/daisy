@@ -249,8 +249,8 @@ def load_config(
     if not config.excel_path or not config.excel_path.exists():
         excel_path_str = mgr.prompt_for_value(
             "PAYSLIP_EXCEL_PATH",
-            "Excel file path not found or invalid.",
-            "../../excel-files/TBKQ-phuclong.xls",
+            "Excel file path not found or invalid. Please input the excel file path",
+            "D:\\path\\to\\excel\\file\\TBKQ-phuclong.xls",
             validator=lambda v: ConfigManager.validate_file_path(v, tool_dir),
         )
         excel_path = Path(excel_path_str)

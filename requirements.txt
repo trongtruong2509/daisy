@@ -16,6 +16,9 @@ pandas>=2.0.0         # Data manipulation (optional but recommended)
 # PDF
 pikepdf>=8.0.0        # PDF password protection
 
+# Colors and Terminal
+colorama>=0.4.6       # Cross-platform colored terminal output (Windows, Mac, Linux)
+
 # Parsing
 beautifulsoup4>=4.12.0  # HTML parsing
 PyYAML>=6.0.1           # YAML config support (optional)

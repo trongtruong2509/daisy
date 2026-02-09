@@ -156,7 +156,7 @@ def setup_logging(
     if console_level:
         console_log_level = getattr(logging, console_level.upper(), logging.INFO)
     else:
-        console_log_level = max(file_level, logging.INFO)
+        console_log_level = CONSOLE #max(file_level, logging.INFO)
     
     # Get root logger
     root_logger = logging.getLogger()

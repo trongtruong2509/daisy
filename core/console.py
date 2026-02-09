@@ -4,6 +4,9 @@ Console output module for Office Automation Foundation.
 Provides standardized, colored console output with automatic logging
 at the custom CONSOLE level for file traceability.
 
+Colors work seamlessly across Windows (PowerShell, Windows Terminal),
+macOS (Terminal), and Linux via colorama library.
+
 All console output goes through cprint() for consistency.
 Each call also logs the message via logger.console() so it appears
 in log files alongside regular log entries.
@@ -18,19 +21,23 @@ Usage:
 """
 
 import logging
+from colorama import Fore, Style, init
 
 from core.logger import CONSOLE
 
 logger = logging.getLogger("core.console")
 
-# ── ANSI Color Codes ────────────────────────────────────────────
-CC_PHASE = "\033[96m"     # Bright cyan for phase headers
-CC_OK = "\033[92m"        # Bright green for success
-CC_WARN = "\033[93m"      # Yellow for warnings
-CC_ERROR = "\033[91m"     # Bright red for errors
-CC_INFO = "\033[37m"      # White for info
-CC_BOX = "\033[96m"       # Bright cyan for boxes/banners
-CC_RESET = "\033[0m"
+# Initialize colorama for cross-platform color support
+init(autoreset=True)
+
+# ── Color Codes (using colorama for cross-platform support) ────────
+CC_PHASE = Fore.CYAN        # Bright cyan for phase headers
+CC_OK = Fore.GREEN          # Bright green for success
+CC_WARN = Fore.YELLOW       # Yellow for warnings
+CC_ERROR = Fore.RED         # Bright red for errors
+CC_INFO = Fore.WHITE        # White for info
+CC_BOX = Fore.CYAN          # Bright cyan for boxes/banners
+CC_RESET = Style.RESET_ALL
 
 # Box-drawing characters
 _BOX_H = "═"
@@ -84,8 +91,8 @@ def _print_info(message: str, spaces: str) -> None:
 
 
 def _print_phase(title: str, spaces: str) -> None:
-    print(f"\n{spaces}{CC_PHASE}▶ {title}{CC_RESET}")
-    logger.log(CONSOLE, f"▶ {title}")
+    print(f"\n{spaces}{CC_PHASE}>> {title}{CC_RESET}")
+    logger.log(CONSOLE, f">> {title}")
 
 
 def _print_success(message: str, spaces: str) -> None:

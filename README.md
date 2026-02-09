@@ -27,7 +27,8 @@ This platform helps automate office tasks like generating documents, sending ema
 
 - **Computer**: Windows 10 or Windows 11
 - **Software**:
-  - Python 3.9 or newer ([Download here](https://www.python.org/downloads/))
+  - Python 3.9 or newer ([Instruction here from MobileMingle](https://www.youtube.com/watch?v=9eYiKMCWSXQ))
+  - Git for Windows: https://git-scm.com/install/windows
   - Microsoft Outlook (desktop app, not web version)
   - Microsoft Excel (for payslip tool)
 - **Permissions**: Regular user account (no admin rights needed)
