@@ -6,20 +6,21 @@ This platform helps automate office tasks like generating documents, sending ema
 
 ---
 
+## Contact point
+
+If you have any issue or any idea to improve this plaform, please contact:
+**Trong H. Truong (trongtruong2509@gmail.com)**
+
+**Last Updated:** 09-Feb-2026
+
+---
+
 ## What's Included
 
-### Available Tools
+### Available Tools (On-going Development)
 
 - **Payslip Generator** (`payslip-phuclong`) - Automatically generates and emails monthly payslips to employees
   - See [tools/payslip-phuclong-ecom/README.md](tools/payslip-phuclong-ecom/README.md) for detailed instructions
-
-### Built-in Features
-
-- **Easy to Use**: Interactive menus and simple commands
-- **Safe Testing**: Test mode available - won't send real emails until you're ready
-- **Resume Support**: If something stops, you can continue where you left off
-- **Activity Logs**: Every action is recorded for your reference
-- **No Duplicates**: Won't send the same email twice by accident
 
 ---
 
@@ -55,13 +56,6 @@ Double-click `setup.bat` or open Command Prompt in the project folder and run:
 ```cmd
 setup.bat
 ```
-
-**What this does:**
-
-- Checks if Python is installed
-- Installs required packages
-- Creates folders for logs and outputs
-- Creates a configuration file template
 
 **First-time setup takes 2-3 minutes.** You only need to do this once.
 
@@ -154,19 +148,6 @@ You don't need to understand what happens behind the scenes - just run the comma
 ---
 
 ## Configuration
-
-### Main Configuration (`.env` file)
-
-The main `.env` file in the project root has general settings:
-
-| Setting      | What It Means                   | Options                             | Default    |
-| ------------ | ------------------------------- | ----------------------------------- | ---------- |
-| `DRY_RUN`    | Test mode - no real emails sent | `true` or `false`                   | `true`     |
-| `LOG_LEVEL`  | Amount of detail in logs        | `INFO`, `DEBUG`, `WARNING`, `ERROR` | `INFO`     |
-| `LOG_DIR`    | Where to save log files         | Any folder path                     | `./logs`   |
-| `OUTPUT_DIR` | Where to save results           | Any folder path                     | `./output` |
-
-**Note:** Most users don't need to change these settings. The defaults work fine.
 
 ### Tool-Specific Configuration
 
@@ -277,57 +258,3 @@ After running tools, you'll find:
 | **Configuration** | `.env` files                 | Settings for each tool              |
 
 ---
-
-## Getting Help
-
-### For Tool-Specific Questions
-
-Check the tool's README file:
-
-- Payslip tool: [tools/payslip-phuclong-ecom/README.md](tools/payslip-phuclong-ecom/README.md)
-
-### For Setup or Technical Issues
-
-1. Check the troubleshooting section above
-2. Look at the log files in `logs/` folder
-3. Contact IT support with:
-   - The error message
-   - What you were trying to do
-   - The log file from `logs/` folder
-
----
-
-## Project Structure
-
-```
-daisy/
-├── run.bat                    # Main launcher - start here!
-├── setup.bat                  # Run once to set everything up
-├── .env                       # General settings
-├── requirements.txt           # List of required packages
-│
-├── tools/                     # All automation tools
-│   └── payslip-phuclong-ecom/ # Payslip generation tool
-│       ├── README.md          # Tool instructions
-│       ├── .env               # Tool settings
-│       └── ...                # Tool files
-│
-├── logs/                      # Activity logs (auto-created)
-├── output/                    # Results and generated files
-└── venv/                      # Python environment (auto-created)
-```
-
----
-
-## Important Notes
-
-✓ **Always test in dry-run mode first** before sending real emails  
-✓ **Keep backups** of your Excel files before running tools  
-✓ **Check log files** if something doesn't work as expected  
-✓ **Don't delete the `venv` folder** - it's needed to run the tools  
-✓ **Read the tool's README** before using it for the first time
-
----
-
-**Last Updated:** February 2026  
-**Internal use only. Not for distribution.**
