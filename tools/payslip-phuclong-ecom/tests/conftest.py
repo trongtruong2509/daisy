@@ -1,153 +1,188 @@
 """
-Shared test fixtures for payslip tool tests.
+Test configuration and shared fixtures for payslip-phuclong-ecom tests.
+
+Provides:
+- Sample employee data factories
+- Mock config objects
+- Temporary directory setup
+- COM mock helpers
 """
 
-import os
+import csv
+import json
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Dict, List
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Set up paths
+# Add project root AND tool directory to path for imports
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 TOOL_DIR = Path(__file__).resolve().parent.parent
-PROJECT_ROOT = TOOL_DIR.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(TOOL_DIR))
 
-# Sample Excel file
-SAMPLE_EXCEL = PROJECT_ROOT / "excel-files" / "TBKQ-phuclong.xls"
+for p in [str(PROJECT_ROOT), str(TOOL_DIR)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
+# ── Employee Data Factories ────────────────────────────────
+
+
+def make_employee(
+    row: int = 4,
+    mnv: str = "001",
+    name: str = "Nguyen Van A",
+    email: str = "a@company.com",
+    password: str = "001",
+) -> Dict[str, Any]:
+    """Create a single employee dict."""
+    return {
+        "row": row,
+        "mnv": mnv,
+        "name": name,
+        "email": email,
+        "password": password,
+    }
+
+
+def make_employees(count: int = 3) -> List[Dict[str, Any]]:
+    """Create a list of sample employees."""
+    employees = []
+    for i in range(1, count + 1):
+        employees.append(
+            make_employee(
+                row=i + 3,
+                mnv=f"{i:03d}",
+                name=f"Employee {i}",
+                email=f"emp{i}@company.com",
+                password=f"{i:03d}",
+            )
+        )
+    return employees
+
+
+# ── Fixtures ────────────────────────────────────────────────
 
 
 @pytest.fixture
 def sample_employee():
-    """A single valid employee dict."""
-    return {
-        "row": 4,
-        "mnv": "6046072",
-        "name": "Nguyen Van A",
-        "email": "test@example.com",
-        "password": "6046072",
-        "columns": {
-            "A": 6046072.0,
-            "B": "Nguyen Van A",
-            "C": "test@example.com",
-            "F": "01/01/2020",
-            "J": 15000000.0,
-            "K": 26.0,
-            "N": 22.0,
-            "O": 12000000.0,
-            "P": 2000000.0,
-            "Q": 500000.0,
-            "R": 300000.0,
-            "S": 200000.0,
-            "T": 1000000.0,
-            "U": 100000.0,
-            "V": 500000.0,
-            "W": 0.0,
-            "X": 0.0,
-            "Y": 0.0,
-            "Z": 200000.0,
-            "AA": 150000.0,
-            "AB": 1200000.0,
-            "AC": 100000.0,
-            "AD": 500000.0,
-            "AH": 13050000.0,
-            "AZ": 6046072.0,
-        },
-    }
+    """Single sample employee."""
+    return make_employee()
 
 
 @pytest.fixture
-def sample_employees(sample_employee):
-    """Multiple test employees."""
-    emp2 = {
-        "row": 5,
-        "mnv": "7012345",
-        "name": "Tran Thi B",
-        "email": "tranb@example.com",
-        "password": "7012345",
-        "columns": {
-            "A": 7012345.0,
-            "B": "Tran Thi B",
-            "C": "tranb@example.com",
-            "F": "03/15/2021",
-            "J": 18000000.0,
-            "K": 26.0,
-            "N": 24.0,
-            "O": 15000000.0,
-            "P": 3000000.0,
-            "Q": 600000.0,
-            "R": 0.0,
-            "S": 0.0,
-            "T": 0.0,
-            "U": 0.0,
-            "V": 1000000.0,
-            "W": 0.0,
-            "X": 0.0,
-            "Y": 0.0,
-            "Z": 0.0,
-            "AA": 150000.0,
-            "AB": 1500000.0,
-            "AC": 120000.0,
-            "AD": 800000.0,
-            "AH": 16030000.0,
-            "AZ": 7012345.0,
-        },
-    }
-    return [sample_employee, emp2]
+def sample_employees():
+    """List of 3 sample employees."""
+    return make_employees(3)
 
 
 @pytest.fixture
-def email_template():
-    """Sample email template cells from bodymail."""
-    return {
-        "A1": "Kính gửi Anh/Chị,",
-        "A3": "Công ty gửi đến Anh/Chị Thông báo phiếu lương của kỳ lương tháng 11/2025.",
-        "A5": "Mật khẩu mở file: Mã số nhân viên của Anh/Chị (7 chữ số không bao gồm số 0 đầu tiên)",
-        "A7": "Mọi thắc mắc liên quan, Anh/Chị vui lòng phản hồi qua email \"vn.phuclong@adecco.com\".",
-        "A9": "Trân trọng,",
-        "A11": "ADECCO VIỆT NAM",
-        "A12": "Email: vn.phuclong@adecco.com",
-    }
-
-
-@pytest.fixture
-def default_cell_mapping():
-    """Default TBKQ cell-to-Data column mapping."""
-    from config import DEFAULT_CELL_MAPPING
-    return dict(DEFAULT_CELL_MAPPING)
-
-
-@pytest.fixture
-def default_calc_mapping():
-    """Default calculated cells mapping."""
-    from config import DEFAULT_CALC_MAPPING
-    return dict(DEFAULT_CALC_MAPPING)
-
-
-@pytest.fixture
-def tmp_output(tmp_path):
+def tmp_output_dir(tmp_path):
     """Temporary output directory."""
-    out = tmp_path / "output"
-    out.mkdir()
+    out = tmp_path / "output" / "012026"
+    out.mkdir(parents=True)
     return out
 
 
 @pytest.fixture
-def minimal_template(tmp_output):
-    """Create a minimal .xlsx template for testing."""
-    import openpyxl
+def tmp_state_dir(tmp_path):
+    """Temporary state directory."""
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    return state
 
-    template_path = tmp_output / "_template.xlsx"
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "TBKQ"
-    ws["A1"] = "THÔNG BÁO PHIẾU LƯƠNG"
-    ws["A2"] = "Kỳ lương tháng 11/2025"
-    ws["A16"] = "A. TĂNG THU NHẬP TRONG KỲ"
-    ws["A17"] = "I. THU NHẬP"
-    ws["A18"] = "(1) Lương cơ bản"
-    ws["A53"] = "C. THỰC LĨNH (A - B)"
-    wb.save(str(template_path))
-    wb.close()
-    return template_path
+
+@pytest.fixture
+def tmp_log_dir(tmp_path):
+    """Temporary log directory."""
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True)
+    return logs
+
+
+@pytest.fixture
+def mock_config(tmp_path, tmp_output_dir, tmp_state_dir, tmp_log_dir):
+    """
+    Create a mock PayslipConfig with temporary directories.
+
+    Provides all attributes used by main.py helper functions.
+    """
+    # Create a dummy Excel file
+    excel_file = tmp_path / "test.xls"
+    excel_file.touch()
+
+    config = MagicMock()
+    config.excel_path = excel_file
+    config.data_sheet = "Data"
+    config.template_sheet = "TBKQ"
+    config.email_body_sheet = "bodymail"
+    config.data_header_row = 2
+    config.data_start_row = 4
+    config.col_mnv = "A"
+    config.col_name = "B"
+    config.col_email = "C"
+    config.col_password = "AZ"
+    config.email_subject = "Test Subject"
+    config.email_subject_cell = "G1"
+    config.email_body_cells = ["A1", "A3", "A5"]
+    config.email_date_cell = "A3"
+    config.date = "01/2026"
+    config.date_mm = "01"
+    config.date_yyyy = "2026"
+    config.date_mmyyyy = "012026"
+    config.outlook_account = "test@company.com"
+    config.dry_run = True
+    config.batch_size = 50
+    config.allow_duplicate_emails = False
+    config.pdf_password_enabled = True
+    config.pdf_password_strip_zeros = True
+    config.pdf_filename_pattern = "TBKQ_{name}_{mmyyyy}"
+    config.keep_pdf_payslips = False
+    config.output_dir = tmp_output_dir
+    config.log_dir = tmp_log_dir
+    config.state_dir = tmp_state_dir
+    config.log_level = "INFO"
+    config.validate.return_value = []
+    config.ensure_directories = MagicMock()
+
+    return config
+
+
+@pytest.fixture
+def mock_email_template():
+    """Sample email template cells."""
+    return {
+        "A1": "Dear Employee,",
+        "A3": "Your payslip for tháng 01/2026 is attached.",
+        "A5": "Password: Your employee ID",
+        "A7": "Best regards,",
+        "A9": "HR Department",
+    }
+
+
+@pytest.fixture
+def mock_com_worksheet():
+    """Create a mock COM worksheet."""
+    ws = MagicMock()
+
+    def mock_range(cell_ref):
+        cell = MagicMock()
+        cell.Value = f"MockValue_{cell_ref}"
+        return cell
+
+    ws.Range = mock_range
+    ws.Cells = MagicMock()
+    ws.Rows = MagicMock()
+    ws.Rows.Count = 65536
+    return ws
+
+
+@pytest.fixture
+def mock_excel_app():
+    """Create a mock Excel COM Application."""
+    app = MagicMock()
+    app.Visible = False
+    app.DisplayAlerts = False
+    return app
