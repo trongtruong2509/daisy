@@ -19,10 +19,14 @@ COM_ERROR_VALUES: Set[int] = {
     -2146826273,  # #VALUE!
 }
 
-# Regex to replace _xlfn.XLOOKUP(lookup, search_range, result_range)
+# Regex to replace XLOOKUP(lookup, search_range, result_range)
 # with INDEX(result_range, MATCH(lookup, search_range, 0))
+#
+# Matches both forms:
+#   _xlfn.XLOOKUP(...)  — compatibility prefix written by Office 2019/2016
+#   XLOOKUP(...)        — native form used by Office 365 / Microsoft 365
 XLOOKUP_PATTERN = re.compile(
-    r"_xlfn\.XLOOKUP\("
+    r"(?:_xlfn\.)?XLOOKUP\("
     r"([^,]+),"       # lookup_value
     r"([^,]+),"       # search_range
     r"([^,\)]+)"      # result_range
@@ -135,7 +139,7 @@ def fix_xlookup_formulas(worksheet, logger=None) -> int:
         for c in range(start_col, start_col + col_count):
             cell = worksheet.Cells(r, c)
             formula = cell.Formula
-            if formula and isinstance(formula, str) and "_xlfn.XLOOKUP" in formula:
+            if formula and isinstance(formula, str) and "XLOOKUP" in formula.upper():
                 new_formula = xlookup_to_index_match(formula)
                 cell.Formula = new_formula
                 fixed_count += 1

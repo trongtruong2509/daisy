@@ -129,10 +129,43 @@ class PayslipGenerator:
                 UpdateLinks=0,
             )
 
-            # Fix XLOOKUP formulas in Data sheet (unsupported in Excel 2016)
-            # Replace with INDEX/MATCH equivalents before generation
-            self._fix_xlookup_formulas(wb, data_sheet)
-            excel.CalculateFullRebuild()
+            # Fix XLOOKUP formulas in both Data and TBKQ sheets.
+            #
+            # Why both sheets:
+            #   - TBKQ template contains XLOOKUP formulas that look up salary
+            #     data from 'bang luong' using B3 (MNV) as the lookup key.
+            #   - fix_xlookup_formulas replaces XLOOKUP with INDEX/MATCH and
+            #     adds +0 coercion so numeric MNV in 'bang luong' is matched
+            #     even when B3 is set as text.
+            #
+            # Why the fix was needed for Office 365:
+            #   - Office 2019 cannot evaluate XLOOKUP → uses cached cell values
+            #     (no recalculation) → appears correct.
+            #   - Office 365 evaluates XLOOKUP natively → recalculates live →
+            #     returns #N/A because B3='6046072' (text) != 6046072 (number).
+            #   - Office 365 stores formulas as plain XLOOKUP(...) without the
+            #     _xlfn. prefix, so the old pattern never matched on 365.
+            # Only trigger a full workbook recalculation when XLOOKUP formulas
+            # were actually replaced. On Office 365, CalculateFullRebuild() forces
+            # recalculation of ALL sheets (including Data!K:K salary formulas).
+            # Those Data-sheet formulas may fail on 365's engine, propagating
+            # #N/A into every TBKQ INDEX/MATCH that reads from them.
+            #
+            # When no XLOOKUP exists (typical case), preserve the Data sheet's
+            # cached values from the last XLS save — they are already correct.
+            # Per-employee ws.Calculate() in _generate_one() recalculates only
+            # the TBKQ sheet after B3 is set, which reads Data's cached values.
+            xlookup_fixed = self._fix_xlookup_formulas(wb, data_sheet)
+            xlookup_fixed += self._fix_xlookup_formulas(wb, template_sheet)
+            if xlookup_fixed > 0:
+                logger.debug(
+                    f"Replaced {xlookup_fixed} XLOOKUP formula(s) — triggering CalculateFullRebuild"
+                )
+                excel.CalculateFullRebuild()
+            else:
+                logger.debug(
+                    "No XLOOKUP replacements — skipping CalculateFullRebuild to preserve Data sheet cache"
+                )
 
             for i, emp in enumerate(employees, 1):
                 mnv = emp.get("mnv", "")
@@ -228,23 +261,154 @@ class PayslipGenerator:
         ws = source_wb.Sheets(template_sheet)
         mnv_value = data_ws.Range(f"{col_mnv}{row}").Value
 
-        # Ensure B3 is text to match Data!A column type
-        ws.Range("B3").NumberFormat = "@"
-        ws.Range("B3").Value = str(mnv_value) if mnv_value else mnv_value
+        # Assign B3 the MNV value, matching the type used in 'bang luong' column L
+        # so that VLOOKUP(B3, 'bang luong'!...) can find the employee.
+        #
+        # ROOT CAUSE of #N/A on Office 365:
+        #   Excel 365 recalculates VLOOKUP live. If B3 type != 'bang luong' L type,
+        #   VLOOKUP exact match returns #N/A. Office 2019 used cached values so the
+        #   type mismatch was never evaluated.
+        #
+        # Strategy: read the first non-empty value from 'bang luong' col L to
+        # determine if MNV is stored as text or number, then set B3 to match.
+        ws.Range("B3").NumberFormat = "General"
 
-        # Step 2: Recalculate TBKQ sheet
+        # COM returns MNV from Data!A as float (e.g. 6046072.0) — convert to int.
+        if mnv_value is not None:
+            try:
+                float_val = float(mnv_value)
+                mnv_value = int(float_val) if float_val == int(float_val) else float_val
+            except (TypeError, ValueError):
+                pass
+
+        # Detect 'bang luong' L column type and set B3 to match
+        bl_mnv_is_text = False
+        try:
+            bl_ws = source_wb.Sheets("bang luong")
+            last_bl_row = bl_ws.Cells(bl_ws.Rows.Count, 12).End(-4162).Row
+            for r in range(1, min(20, last_bl_row + 1)):
+                sample = bl_ws.Cells(r, 12).Value  # col L = index 12
+                if sample is not None:
+                    bl_mnv_is_text = isinstance(sample, str)
+                    logger.debug(
+                        f"[GEN-DEBUG] bang luong L{r} sample: value={sample!r}, "
+                        f"type={type(sample).__name__} → "
+                        f"{'TEXT — will set B3 as text' if bl_mnv_is_text else 'NUMBER — will set B3 as number'}"
+                    )
+                    break
+        except Exception as ex:
+            logger.debug(f"[GEN-DEBUG] Could not read bang luong type sample: {ex}")
+
+        if bl_mnv_is_text:
+            # 'bang luong' stores MNV as text → B3 must also be text
+            ws.Range("B3").NumberFormat = "@"
+            ws.Range("B3").Value = str(int(mnv_value)) if isinstance(mnv_value, (int, float)) else str(mnv_value)
+            logger.debug(f"[GEN-DEBUG] B3 set as TEXT: {ws.Range('B3').Value!r}")
+        else:
+            # 'bang luong' stores MNV as number → B3 must also be number
+            ws.Range("B3").Value = mnv_value
+            logger.debug(f"[GEN-DEBUG] B3 set as NUMBER: {ws.Range('B3').Value!r}")
+
+        # Diagnostic: dump C10 formula and the named range "TBKQ" definition
+        # so we can see EXACTLY what VLOOKUP is doing and where it looks.
+        try:
+            c10_formula = ws.Range("C10").Formula
+            logger.debug(f"[GEN-DEBUG] C10 formula: {c10_formula!r}")
+        except Exception as ex:
+            logger.debug(f"[GEN-DEBUG] Cannot read C10 formula: {ex}")
+        try:
+            tbkq_range_def = source_wb.Names("TBKQ").RefersTo
+            logger.debug(f"[GEN-DEBUG] Named range TBKQ = {tbkq_range_def!r}")
+        except Exception as ex:
+            logger.debug(f"[GEN-DEBUG] Named range TBKQ not found or error: {ex}")
+
+        # Diagnostic: inspect Data sheet col A type to understand what
+        # the TBKQ named range contains as lookup key values.
+        try:
+            d_row = data_ws.Range(f"{col_mnv}{row}").Value
+            d_formula = data_ws.Range(f"{col_mnv}{row}").Formula
+            logger.debug(
+                f"[GEN-DEBUG] Data!{col_mnv}{row} value={d_row!r} "
+                f"({type(d_row).__name__}), formula={d_formula!r}"
+            )
+        except Exception as ex:
+            logger.debug(f"[GEN-DEBUG] Cannot inspect Data sheet: {ex}")
+
+        # Step 2: Full recalculation of TBKQ sheet in source workbook
         ws.Calculate()
 
-        # Step 3: Copy TBKQ sheet to a new workbook
+        # Log sample cell values from TBKQ after recalculation.
+        # COM_ERROR_VALUES are negative ints for #N/A, #REF!, #VALUE! etc.
+        # If values here are already #N/A the issue is in B3/VLOOKUP.
+        # If values here are correct but PDF is #N/A, issue is in Copy/paste step.
+        _com_errors = {-2146826246, -2146826281, -2146826259, -2146826288,
+                       -2146826252, -2146826265, -2146826273}
+        def _cell_repr(sheet, addr):
+            try:
+                v = sheet.Range(addr).Value
+                if isinstance(v, int) and v in _com_errors:
+                    return f"#ERR({v})"
+                return repr(v)
+            except Exception as ex:
+                return f"ERROR({ex})"
+
+        logger.debug(
+            f"[GEN-DEBUG] TBKQ values after Calculate(): "
+            f"B3={_cell_repr(ws,'B3')}, "
+            f"C5={_cell_repr(ws,'C5')}, C8={_cell_repr(ws,'C8')}, "
+            f"C10={_cell_repr(ws,'C10')}, D10={_cell_repr(ws,'D10')}"
+        )
+
+        # Step 3: Disable auto-calculation BEFORE Copy so the new workbook does
+        # NOT immediately recalculate its formulas (which become broken external
+        # references after copy on Office 365, producing #N/A).
+        #
+        # Office 2019: After ws.Copy(), new workbook retains CACHED values from
+        #   the source — auto-recalculation did not fire before PasteSpecial.
+        # Office 365: Immediately triggers full recalculation after ws.Copy(),
+        #   external VLOOKUP refs fail → #N/A captured by PasteSpecial.
+        #
+        # Fix: suspend calculation around the copy+paste block.
+        try:
+            excel.Calculation = -4135  # xlCalculationManual
+            excel.CalculateBeforeSave = False
+        except Exception as e:
+            logger.debug(f"[GEN-DEBUG] Could not set Calculation=Manual: {e}")
+
+        # Copy TBKQ sheet to a new workbook
         ws.Copy()
         new_wb = excel.ActiveWorkbook
         new_ws = new_wb.ActiveSheet
 
-        # Step 4: IMMEDIATELY paste as values to break external references
-        # This must happen FIRST to avoid external link dialogs/hangs
+        # Log new workbook cell state BEFORE paste — the critical diagnostic.
+        # Correct = same values as source TBKQ above.
+        # All #ERR = Office 365 recalculated external refs before we got here
+        #            (fix above did not work, deeper issue).
+        logger.debug(
+            f"[GEN-DEBUG] new_ws values BEFORE paste (formula state): "
+            f"B3={_cell_repr(new_ws,'B3')}, "
+            f"C5={_cell_repr(new_ws,'C5')}, C8={_cell_repr(new_ws,'C8')}, "
+            f"C10={_cell_repr(new_ws,'C10')}, D10={_cell_repr(new_ws,'D10')}"
+        )
+
+        # Step 4: Paste as values — captures current cell state into literal values
         new_ws.Cells.Copy()
         new_ws.Range("A1").PasteSpecial(Paste=-4163)  # xlPasteValues
         excel.CutCopyMode = False
+
+        # Restore automatic calculation
+        try:
+            excel.Calculation = -4105  # xlCalculationAutomatic
+        except Exception:
+            pass
+
+        # Log new workbook AFTER paste — should show correct values now.
+        logger.debug(
+            f"[GEN-DEBUG] new_ws values AFTER paste (captured values): "
+            f"B3={_cell_repr(new_ws,'B3')}, "
+            f"C5={_cell_repr(new_ws,'C5')}, C8={_cell_repr(new_ws,'C8')}, "
+            f"C10={_cell_repr(new_ws,'C10')}, D10={_cell_repr(new_ws,'D10')}"
+        )
 
         # Step 5: Delete macro buttons
         try:
@@ -314,13 +478,13 @@ class PayslipGenerator:
         """
         return xlookup_to_index_match(formula)
 
-    def _fix_xlookup_formulas(self, wb, data_sheet: str):
+    def _fix_xlookup_formulas(self, wb, sheet_name: str) -> int:
         """
-        Replace all _xlfn.XLOOKUP formulas in the Data sheet with
-        INDEX/MATCH equivalents so they work in Excel versions that
-        don't support XLOOKUP (e.g., Excel 2016).
+        Replace all XLOOKUP formulas in the given sheet with INDEX/MATCH
+        equivalents so they work in Excel versions that don't support XLOOKUP.
 
+        Returns the number of formulas replaced.
         Delegates to office.excel.utils.fix_xlookup_formulas.
         """
-        ws = wb.Sheets(data_sheet)
-        fix_xlookup_formulas(ws, logger=logger)
+        ws = wb.Sheets(sheet_name)
+        return fix_xlookup_formulas(ws, logger=logger)
