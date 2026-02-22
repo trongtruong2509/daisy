@@ -142,7 +142,7 @@ class PayslipConfig:
     def validate(self) -> List[str]:
         """Validate configuration, return list of errors."""
         errors = []
-        if not self.excel_path or not self.excel_path.exists():
+        if not self.excel_path or not self.excel_path.is_file():
             errors.append(f"PAYSLIP_EXCEL_PATH not set or file not found: {self.excel_path}")
         if not self.date:
             errors.append("DATE is required (format: MM/YYYY)")
@@ -237,7 +237,7 @@ def load_config(
 
     # Check if any prompts are needed
     needs_prompt = (
-        (not config.excel_path or not config.excel_path.exists()) or
+        (not config.excel_path or not config.excel_path.is_file()) or
         not config.date or
         not config.outlook_account
     )
@@ -246,13 +246,14 @@ def load_config(
         cprint("Configuration", level="PHASE")
         print()
 
-    if not config.excel_path or not config.excel_path.exists():
+    if not config.excel_path or not config.excel_path.is_file():
         excel_path_str = mgr.prompt_for_value(
             "PAYSLIP_EXCEL_PATH",
             "Excel file path not found or invalid. Please input the excel file path",
             "D:\\path\\to\\excel\\file\\TBKQ-phuclong.xls",
             validator=lambda v: ConfigManager.validate_file_path(v, tool_dir),
         )
+        # prompt_for_value() and validate_file_path() already normalize quotes
         excel_path = Path(excel_path_str)
         if not excel_path.is_absolute():
             excel_path = tool_dir / excel_path

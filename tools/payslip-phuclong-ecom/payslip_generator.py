@@ -456,6 +456,31 @@ class PayslipGenerator:
             )
             new_ws.Range("A2").Value = updated
 
+        # Step 11b: Update date in A10 cell.
+        # A10 holds an Excel date value (pywintypes.datetime) displayed with
+        # format "mm-yyyy".  It is merged A10:A12, so MergeArea.Cells(1,1) is
+        # used for both read and write.  We replace the date with the 1st day
+        # of the configured month/year.
+        if self.month and self.year:
+            try:
+                import datetime as _dt
+                a10_range = new_ws.Range("A10")
+                is_merged = bool(a10_range.MergeCells)
+                a10_top = a10_range.MergeArea.Cells(1, 1) if is_merged else a10_range
+                a10_val = a10_top.Value
+                logger.debug(
+                    f"[GEN-DEBUG] A10 raw: merged={is_merged}, "
+                    f"value={a10_val!r} (type={type(a10_val).__name__})"
+                )
+                # Use day=15 to avoid UTC ±day boundary issues on timezones
+                # ahead of UTC (e.g. UTC+7).  The mm-yyyy format only displays
+                # month and year, so the exact day has no visible effect.
+                new_date = _dt.datetime(int(self.year), int(self.month), 15)
+                a10_top.Value = new_date
+                logger.debug(f"[GEN-DEBUG] A10 updated: {a10_val!r} → {new_date!r}")
+            except Exception as e:
+                logger.debug(f"[GEN-DEBUG] A10 update failed: {e}")
+
         # Step 12: Save as .xlsx
         excel.DisplayAlerts = False
         new_wb.SaveAs(

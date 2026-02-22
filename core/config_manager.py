@@ -100,10 +100,17 @@ class ConfigManager:
         Get environment variable as Path.
 
         Relative paths are resolved against base_dir if provided.
+        Normalizes the value to remove quotes and batch file artifacts.
         """
         value = os.getenv(key, default)
         if not value:
             return Path(default) if default else Path("")
+        
+        # Normalize to remove quotes from .env file entries
+        value = ConfigManager._normalize_path_input(value)
+        if not value:
+            return Path(default) if default else Path("")
+        
         path = Path(value)
         if base_dir and not path.is_absolute():
             path = Path(base_dir) / path
@@ -153,6 +160,10 @@ class ConfigManager:
             print(f"Example: {example}")
         while True:
             value = input(f"{key}: ").strip()
+            
+            # Normalize: remove quotes, CR/LF, etc. (esp. from batch file input)
+            value = ConfigManager._normalize_path_input(value)
+            
             if not value:
                 print("Value cannot be empty. Please try again.")
                 continue
@@ -180,6 +191,47 @@ class ConfigManager:
             print(f"  Warning: Could not save to .env: {e}")
 
     # ── Built-in Validators ─────────────────────────────────
+
+    @staticmethod
+    def _normalize_path_input(value: str) -> str:
+        """
+        Normalize path input from user (batch file, PowerShell, or manual entry).
+        
+        Strips quotes, whitespace, and handles batch file edge cases:
+        - Leading/trailing quotes (single, double, or mixed)
+        - Carriage returns and other CR/LF from batch stdin
+        - Escaped quotes (e.g., from batch variable expansion)
+        
+        Args:
+            value: Raw user input string
+            
+        Returns:
+            Normalized path string without surrounding quotes
+        """
+        # Remove CR/LF and other hidden characters from batch file input
+        value = value.rstrip('\r\n\x00')
+        
+        # Outer strip of whitespace
+        value = value.strip()
+        
+        # Handle different quote combinations:
+        # - Double quotes only
+        # - Single quotes only  
+        # - Mixed or paired quotes on both ends
+        if (value.startswith('"') and value.endswith('"')) or \
+           (value.startswith("'") and value.endswith("'")):
+            value = value[1:-1]
+        elif value.startswith('"'):
+            value = value.lstrip('"')
+        elif value.startswith("'"):
+            value = value.lstrip("'")
+            
+        if value.endswith('"'):
+            value = value.rstrip('"')
+        elif value.endswith("'"):
+            value = value.rstrip("'")
+        
+        return value.strip()
 
     @staticmethod
     def validate_date(value: str) -> Tuple[bool, str]:
@@ -211,7 +263,9 @@ class ConfigManager:
         Validate that a file path exists.
 
         Relative paths are resolved against base_dir if provided.
+        Normalizes input to remove quotes and batch file artifacts.
         """
+        value = ConfigManager._normalize_path_input(value)
         file_path = Path(value)
         if base_dir and not file_path.is_absolute():
             file_path = Path(base_dir) / file_path
