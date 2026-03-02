@@ -129,42 +129,38 @@ class PayslipGenerator:
                 UpdateLinks=0,
             )
 
-            # Fix XLOOKUP formulas in both Data and TBKQ sheets.
+            # Fix XLOOKUP formulas in the TBKQ template sheet ONLY.
             #
-            # Why both sheets:
-            #   - TBKQ template contains XLOOKUP formulas that look up salary
-            #     data from 'bang luong' using B3 (MNV) as the lookup key.
-            #   - fix_xlookup_formulas replaces XLOOKUP with INDEX/MATCH and
-            #     adds +0 coercion so numeric MNV in 'bang luong' is matched
-            #     even when B3 is set as text.
+            # Why TBKQ only (NOT Data sheet):
+            #   The Data sheet holds pre-computed salary values that were
+            #   cached when the XLS file was last saved by HR in Excel. Those
+            #   cached values are correct and must NOT be recalculated here.
             #
-            # Why the fix was needed for Office 365:
-            #   - Office 2019 cannot evaluate XLOOKUP → uses cached cell values
-            #     (no recalculation) → appears correct.
-            #   - Office 365 evaluates XLOOKUP natively → recalculates live →
-            #     returns #N/A because B3='6046072' (text) != 6046072 (number).
-            #   - Office 365 stores formulas as plain XLOOKUP(...) without the
-            #     _xlfn. prefix, so the old pattern never matched on 365.
-            # Only trigger a full workbook recalculation when XLOOKUP formulas
-            # were actually replaced. On Office 365, CalculateFullRebuild() forces
-            # recalculation of ALL sheets (including Data!K:K salary formulas).
-            # Those Data-sheet formulas may fail on 365's engine, propagating
-            # #N/A into every TBKQ INDEX/MATCH that reads from them.
+            #   Replacing XLOOKUP in the Data sheet and then calling
+            #   CalculateFullRebuild() forces Data sheet formulas to re-evaluate
+            #   with the +0 coercion. If the lookup key type in 'bang luong'
+            #   mismatches (text vs. number), every Data!K:K cell returns #N/A
+            #   and TBKQ formulas that read from Data!K:K also return #N/A.
             #
-            # When no XLOOKUP exists (typical case), preserve the Data sheet's
-            # cached values from the last XLS save — they are already correct.
-            # Per-employee ws.Calculate() in _generate_one() recalculates only
-            # the TBKQ sheet after B3 is set, which reads Data's cached values.
-            xlookup_fixed = self._fix_xlookup_formulas(wb, data_sheet)
-            xlookup_fixed += self._fix_xlookup_formulas(wb, template_sheet)
+            # Why TBKQ may still need fixing:
+            #   TBKQ may contain XLOOKUP formulas that look up B3 directly
+            #   against 'bang luong'. On Office 365 these are evaluated live.
+            #   INDEX/MATCH replacement with +0 coercion makes them type-safe.
+            #   Per-employee ws.Calculate() in _generate_one() then recalculates
+            #   the TBKQ sheet only, reading Data sheet cached values.
+            #
+            # CalculateFullRebuild is intentionally NOT called. Recalculating the
+            # entire workbook would re-evaluate Data sheet formulas whose results
+            # are already correct from the XLS save.
+            xlookup_fixed = self._fix_xlookup_formulas(wb, template_sheet)
             if xlookup_fixed > 0:
                 logger.debug(
-                    f"Replaced {xlookup_fixed} XLOOKUP formula(s) — triggering CalculateFullRebuild"
+                    f"Replaced {xlookup_fixed} XLOOKUP formula(s) in {template_sheet} — "
+                    "per-employee ws.Calculate() will apply them"
                 )
-                excel.CalculateFullRebuild()
             else:
                 logger.debug(
-                    "No XLOOKUP replacements — skipping CalculateFullRebuild to preserve Data sheet cache"
+                    f"No XLOOKUP formulas in {template_sheet} — Data sheet cache preserved"
                 )
 
             for i, emp in enumerate(employees, 1):
@@ -261,51 +257,33 @@ class PayslipGenerator:
         ws = source_wb.Sheets(template_sheet)
         mnv_value = data_ws.Range(f"{col_mnv}{row}").Value
 
-        # Assign B3 the MNV value, matching the type used in 'bang luong' column L
-        # so that VLOOKUP(B3, 'bang luong'!...) can find the employee.
+        # Set B3 = MNV, matching the exact type stored in Data!A (the lookup
+        # key column used by MATCH($B$3, Data!$A:$A, 0) in TBKQ formulas).
         #
-        # ROOT CAUSE of #N/A on Office 365:
-        #   Excel 365 recalculates VLOOKUP live. If B3 type != 'bang luong' L type,
-        #   VLOOKUP exact match returns #N/A. Office 2019 used cached values so the
-        #   type mismatch was never evaluated.
+        # Why type matters on Office 365:
+        #   Excel 365 recalculates MATCH live. MATCH(text, number_column, 0)
+        #   returns #N/A even when values look identical. We read mnv_value
+        #   directly from Data!A{row}, so its Python type is authoritative:
+        #     str  → B3 must be text  (NumberFormat "@")
+        #     int/float → B3 must be a number (NumberFormat "General")
         #
-        # Strategy: read the first non-empty value from 'bang luong' col L to
-        # determine if MNV is stored as text or number, then set B3 to match.
-        ws.Range("B3").NumberFormat = "General"
-
-        # COM returns MNV from Data!A as float (e.g. 6046072.0) — convert to int.
-        if mnv_value is not None:
+        # COM returns numeric cells as float (e.g. 6046072.0) — convert to int.
+        if mnv_value is not None and isinstance(mnv_value, float):
             try:
-                float_val = float(mnv_value)
-                mnv_value = int(float_val) if float_val == int(float_val) else float_val
+                int_val = int(mnv_value)
+                if mnv_value == int_val:
+                    mnv_value = int_val
             except (TypeError, ValueError):
                 pass
 
-        # Detect 'bang luong' L column type and set B3 to match
-        bl_mnv_is_text = False
-        try:
-            bl_ws = source_wb.Sheets("bang luong")
-            last_bl_row = bl_ws.Cells(bl_ws.Rows.Count, 12).End(-4162).Row
-            for r in range(1, min(20, last_bl_row + 1)):
-                sample = bl_ws.Cells(r, 12).Value  # col L = index 12
-                if sample is not None:
-                    bl_mnv_is_text = isinstance(sample, str)
-                    logger.debug(
-                        f"[GEN-DEBUG] bang luong L{r} sample: value={sample!r}, "
-                        f"type={type(sample).__name__} → "
-                        f"{'TEXT — will set B3 as text' if bl_mnv_is_text else 'NUMBER — will set B3 as number'}"
-                    )
-                    break
-        except Exception as ex:
-            logger.debug(f"[GEN-DEBUG] Could not read bang luong type sample: {ex}")
-
-        if bl_mnv_is_text:
-            # 'bang luong' stores MNV as text → B3 must also be text
+        ws.Range("B3").NumberFormat = "General"
+        if isinstance(mnv_value, str):
+            # Data!A stores MNV as text → B3 must also be text
             ws.Range("B3").NumberFormat = "@"
-            ws.Range("B3").Value = str(int(mnv_value)) if isinstance(mnv_value, (int, float)) else str(mnv_value)
+            ws.Range("B3").Value = mnv_value
             logger.debug(f"[GEN-DEBUG] B3 set as TEXT: {ws.Range('B3').Value!r}")
         else:
-            # 'bang luong' stores MNV as number → B3 must also be number
+            # Data!A stores MNV as number → B3 must also be number
             ws.Range("B3").Value = mnv_value
             logger.debug(f"[GEN-DEBUG] B3 set as NUMBER: {ws.Range('B3').Value!r}")
 
