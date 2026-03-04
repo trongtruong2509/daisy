@@ -71,6 +71,7 @@ class PayslipGenerator:
         self,
         employees: List[Dict[str, Any]],
         source_xls: Path,
+        batch_size: int,
         template_sheet: str = "TBKQ",
         data_sheet: str = "Data",
         col_mnv: str = "A",
@@ -90,6 +91,8 @@ class PayslipGenerator:
             template_sheet: Name of the TBKQ sheet.
             data_sheet: Name of the Data sheet.
             col_mnv: Column letter for MNV in Data sheet.
+            batch_size: Max employees per Excel session (0 = all in one session).
+                        Restart Excel between batches to prevent COM OOM.
 
         Returns:
             List of result dicts with 'employee', 'xlsx_path', 'success'.
@@ -119,104 +122,140 @@ class PayslipGenerator:
                     progress_callback(i, total, emp.get("name", ""), skipped=True)
             return results
 
-        excel = win32.Dispatch("Excel.Application")
-        excel.Visible = False
-        excel.DisplayAlerts = False
+        # Fix B: split employees into chunks and restart Excel between them.
+        # batch_size=0 means process all in one session (legacy behaviour).
+        effective_batch_size = batch_size if batch_size > 0 else total
+        chunks = [
+            employees[i:i + effective_batch_size]
+            for i in range(0, total, effective_batch_size)
+        ]
 
-        try:
-            wb = excel.Workbooks.Open(
-                str(Path(source_xls).resolve()),
-                UpdateLinks=0,
+        if len(chunks) > 1:
+            logger.info(
+                f"Processing {total} employees in {len(chunks)} batch(es) "
+                f"of up to {effective_batch_size} each (COM restart between batches)"
             )
 
-            # Fix XLOOKUP formulas in the TBKQ template sheet ONLY.
-            #
-            # Why TBKQ only (NOT Data sheet):
-            #   The Data sheet holds pre-computed salary values that were
-            #   cached when the XLS file was last saved by HR in Excel. Those
-            #   cached values are correct and must NOT be recalculated here.
-            #
-            #   Replacing XLOOKUP in the Data sheet and then calling
-            #   CalculateFullRebuild() forces Data sheet formulas to re-evaluate
-            #   with the +0 coercion. If the lookup key type in 'bang luong'
-            #   mismatches (text vs. number), every Data!K:K cell returns #N/A
-            #   and TBKQ formulas that read from Data!K:K also return #N/A.
-            #
-            # Why TBKQ may still need fixing:
-            #   TBKQ may contain XLOOKUP formulas that look up B3 directly
-            #   against 'bang luong'. On Office 365 these are evaluated live.
-            #   INDEX/MATCH replacement with +0 coercion makes them type-safe.
-            #   Per-employee ws.Calculate() in _generate_one() then recalculates
-            #   the TBKQ sheet only, reading Data sheet cached values.
-            #
-            # CalculateFullRebuild is intentionally NOT called. Recalculating the
-            # entire workbook would re-evaluate Data sheet formulas whose results
-            # are already correct from the XLS save.
-            xlookup_fixed = self._fix_xlookup_formulas(wb, template_sheet)
-            if xlookup_fixed > 0:
-                logger.debug(
-                    f"Replaced {xlookup_fixed} XLOOKUP formula(s) in {template_sheet} — "
-                    "per-employee ws.Calculate() will apply them"
-                )
-            else:
-                logger.debug(
-                    f"No XLOOKUP formulas in {template_sheet} — Data sheet cache preserved"
-                )
+        processed_count = 0  # global index across all chunks
 
-            for i, emp in enumerate(employees, 1):
-                mnv = emp.get("mnv", "")
-                name = emp.get("name", "")
-
-                # Resume support: skip if output already exists
-                output_path = self._build_output_path(emp)
-                if output_path.exists() or output_path.with_suffix(".pdf").exists():
-                    logger.debug(f"[{i}/{total}] Skipping {name} - output already exists")
-                    results.append({
-                        "employee": emp,
-                        "xlsx_path": output_path if output_path.exists() else None,
-                        "success": True,
-                        "skipped": True,
-                    })
-                    if progress_callback:
-                        progress_callback(i, total, name, skipped=True)
-                    continue
-
+        for chunk_idx, chunk in enumerate(chunks, 1):
+            if len(chunks) > 1:
                 logger.info(
-                    f"[{i}/{total}] Generating payslip for {name} (MNV: {mnv})"
+                    f"[Batch {chunk_idx}/{len(chunks)}] Starting Excel "
+                    f"({len(chunk)} employees)"
                 )
 
-                try:
-                    xlsx_path = self._generate_one(
-                        excel, wb, template_sheet, data_sheet, col_mnv, emp
-                    )
-                    results.append({
-                        "employee": emp,
-                        "xlsx_path": xlsx_path,
-                        "success": xlsx_path is not None,
-                        "skipped": False,
-                    })
-                    if progress_callback:
-                        progress_callback(i, total, name, skipped=False)
-                except Exception as e:
-                    logger.error(f"Failed to generate payslip for {name}: {e}")
-                    results.append({
-                        "employee": emp,
-                        "xlsx_path": None,
-                        "success": False,
-                        "skipped": False,
-                    })
-                    if progress_callback:
-                        progress_callback(i, total, name, skipped=False)
+            excel = win32.Dispatch("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
 
-            wb.Close(SaveChanges=False)
-        finally:
             try:
-                excel.Quit()
-            except Exception:
-                pass
-            del excel
-            gc.collect()
-            time.sleep(2)
+                wb = excel.Workbooks.Open(
+                    str(Path(source_xls).resolve()),
+                    UpdateLinks=0,
+                )
+
+                # Fix XLOOKUP formulas in the TBKQ template sheet ONLY.
+                #
+                # Why TBKQ only (NOT Data sheet):
+                #   The Data sheet holds pre-computed salary values that were
+                #   cached when the XLS file was last saved by HR in Excel. Those
+                #   cached values are correct and must NOT be recalculated here.
+                #
+                #   Replacing XLOOKUP in the Data sheet and then calling
+                #   CalculateFullRebuild() forces Data sheet formulas to re-evaluate
+                #   with the +0 coercion. If the lookup key type in 'bang luong'
+                #   mismatches (text vs. number), every Data!K:K cell returns #N/A
+                #   and TBKQ formulas that read from Data!K:K also return #N/A.
+                #
+                # Why TBKQ may still need fixing:
+                #   TBKQ may contain XLOOKUP formulas that look up B3 directly
+                #   against 'bang luong'. On Office 365 these are evaluated live.
+                #   INDEX/MATCH replacement with +0 coercion makes them type-safe.
+                #   Per-employee ws.Calculate() in _generate_one() then recalculates
+                #   the TBKQ sheet only, reading Data sheet cached values.
+                #
+                # CalculateFullRebuild is intentionally NOT called. Recalculating the
+                # entire workbook would re-evaluate Data sheet formulas whose results
+                # are already correct from the XLS save.
+                xlookup_fixed = self._fix_xlookup_formulas(wb, template_sheet)
+                if xlookup_fixed > 0:
+                    logger.debug(
+                        f"Replaced {xlookup_fixed} XLOOKUP formula(s) in {template_sheet} — "
+                        "per-employee ws.Calculate() will apply them"
+                    )
+                else:
+                    logger.debug(
+                        f"No XLOOKUP formulas in {template_sheet} — Data sheet cache preserved"
+                    )
+
+                for emp in chunk:
+                    processed_count += 1
+                    global_i = processed_count
+                    mnv = emp.get("mnv", "")
+                    name = emp.get("name", "")
+
+                    # Resume support: skip if output already exists
+                    output_path = self._build_output_path(emp)
+                    if output_path.exists() or output_path.with_suffix(".pdf").exists():
+                        logger.debug(
+                            f"[{global_i}/{total}] Skipping {name} - output already exists"
+                        )
+                        results.append({
+                            "employee": emp,
+                            "xlsx_path": output_path if output_path.exists() else None,
+                            "success": True,
+                            "skipped": True,
+                        })
+                        if progress_callback:
+                            progress_callback(global_i, total, name, skipped=True)
+                        continue
+
+                    logger.info(
+                        f"[{global_i}/{total}] Generating payslip for {name} (MNV: {mnv})"
+                    )
+
+                    try:
+                        xlsx_path = self._generate_one(
+                            excel, wb, template_sheet, data_sheet, col_mnv, emp
+                        )
+                        results.append({
+                            "employee": emp,
+                            "xlsx_path": xlsx_path,
+                            "success": xlsx_path is not None,
+                            "skipped": False,
+                        })
+                        if progress_callback:
+                            progress_callback(global_i, total, name, skipped=False)
+                    except Exception as e:
+                        logger.error(f"Failed to generate payslip for {name}: {e}")
+                        results.append({
+                            "employee": emp,
+                            "xlsx_path": None,
+                            "success": False,
+                            "skipped": False,
+                        })
+                        if progress_callback:
+                            progress_callback(global_i, total, name, skipped=False)
+
+                    # Fix A: release per-employee COM proxies before next iteration
+                    gc.collect()
+
+                wb.Close(SaveChanges=False)
+            finally:
+                try:
+                    excel.Quit()
+                except Exception:
+                    pass
+                del excel
+                gc.collect()
+                time.sleep(2)
+
+            if chunk_idx < len(chunks):
+                logger.info(
+                    f"[Batch {chunk_idx}/{len(chunks)}] Complete. "
+                    f"Excel restarted. Starting batch {chunk_idx + 1}/{len(chunks)}."
+                )
 
         success = sum(1 for r in results if r["success"])
         failed = total - success
@@ -467,6 +506,15 @@ class PayslipGenerator:
         )
         new_wb.Saved = True
         new_wb.Close()
+
+        # Fix A: explicitly release COM proxy references so Python's garbage
+        # collector can decrement the RCW ref count immediately, not on some
+        # future GC cycle. Without this, 700+ iterations accumulate hundreds
+        # of unreleased COM proxies and the Excel process runs OOM.
+        del new_ws
+        del new_wb
+        del data_ws
+        del ws
 
         logger.debug(f"Generated payslip: {output_path}")
         return output_path

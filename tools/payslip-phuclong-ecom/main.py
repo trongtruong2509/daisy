@@ -210,10 +210,11 @@ def generate_payslips(config, employees):
         results = generator.generate_batch(
             employees=employees,
             source_xls=config.excel_path,
+            batch_size=config.batch_size,
             template_sheet=config.template_sheet,
             data_sheet=config.data_sheet,
             col_mnv=config.col_mnv,
-            progress_callback=gen_progress,
+            progress_callback=gen_progress
         )
     except Exception as e:
         cprint(f"Payslip generation failed: {e}", level="ERROR")

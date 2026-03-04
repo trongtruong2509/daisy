@@ -56,7 +56,7 @@ from office.outlook.exceptions import (
     DryRunBlockedError,
     OutlookError,
 )
-from office.outlook.models import NewEmail, Importance
+from office.outlook.models import NewEmail
 
 logger = logging.getLogger(__name__)
 
