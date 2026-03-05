@@ -5,6 +5,7 @@
 **Daisy** is a Windows-only office automation platform structured as a shared foundation (`core/`, `office/`) with isolated tools under `tools/<tool-name>/`.
 
 ```
+docs/          # Documentation, including project requirements and tool-specific requirements
 core/          # Shared infrastructure: config, logging, state tracking, retry, console output
 office/        # Wrappers around Windows COM: Excel (openpyxl + COM) and Outlook
 parsing/       # HTML/text parsers (shared utilities)
