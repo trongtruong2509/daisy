@@ -18,6 +18,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from office.utils.com import com_initialized, ensure_com_available, get_win32com_client
+from office.utils.helpers import create_excel_background, safe_quit_excel
 from office.excel.utils import col_letter_to_index, safe_cell_value
 
 logger = logging.getLogger(__name__)
@@ -39,12 +41,15 @@ class ExcelComReader:
         Raises:
             FileNotFoundError: If the file does not exist.
         """
+        ensure_com_available()
         self.excel_path = Path(excel_path).resolve()
         if not self.excel_path.exists():
             raise FileNotFoundError(f"Excel file not found: {self.excel_path}")
 
         self._excel = None
         self._workbook = None
+        self._was_already_running = False
+        self._com_ctx = None
 
     def open(self, read_only: bool = True, recalculate: bool = True) -> None:
         """
@@ -54,9 +59,10 @@ class ExcelComReader:
             read_only: Open in read-only mode.
             recalculate: Force full formula recalculation after opening.
         """
-        import win32com.client as win32
+        self._com_ctx = com_initialized()
+        self._com_ctx.__enter__()
 
-        self._excel = win32.Dispatch("Excel.Application")
+        self._excel, self._was_already_running = create_excel_background()
         self._excel.Visible = False
         self._excel.DisplayAlerts = False
 
@@ -76,19 +82,19 @@ class ExcelComReader:
         logger.info(f"Opened Excel file via COM: {self.excel_path}")
 
     def close(self) -> None:
-        """Close the workbook and quit Excel COM."""
+        """Close the workbook and release Excel COM."""
         if self._workbook:
             try:
                 self._workbook.Close(SaveChanges=False)
             except Exception:
                 pass
-        if self._excel:
-            try:
-                self._excel.Quit()
-            except Exception:
-                pass
+        safe_quit_excel(self._excel, self._was_already_running)
         self._excel = None
         self._workbook = None
+
+        if self._com_ctx:
+            self._com_ctx.__exit__(None, None, None)
+            self._com_ctx = None
 
     def __enter__(self):
         self.open()

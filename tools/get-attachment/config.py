@@ -22,7 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.config_manager import ConfigManager
 from core.console import cprint
-from office.outlook import get_outlook_accounts
+from office.outlook import OutlookClient
 
 
 # ── Validators ───────────────────────────────────────────────────
@@ -50,7 +50,7 @@ def _prompt_for_outlook_account() -> str:
     Returns:
         Selected email address string.
     """
-    accounts = get_outlook_accounts()
+    accounts = OutlookClient.get_available_accounts()
 
     print()
     if not accounts:

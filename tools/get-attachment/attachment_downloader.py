@@ -24,7 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.console import cprint
 from core.retry import retry_operation, RetryConfig
-from office.outlook.client import OutlookClient
+from office.outlook.reader import OutlookReader
 from office.outlook.models import Email, EmailFilter, Attachment
 
 logger = logging.getLogger(__name__)
@@ -242,7 +242,7 @@ class AttachmentDownloader:
 
         cprint(f"Connecting to Outlook account: {self.config.outlook_account}", level="INFO")
 
-        with OutlookClient(account=self.config.outlook_account) as client:
+        with OutlookReader(account=self.config.outlook_account) as client:
             cprint("Connected to Outlook", level="SUCCESS")
             cprint(
                 f"Searching Inbox for emails from {self.config.start_date} "

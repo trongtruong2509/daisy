@@ -81,13 +81,11 @@ class TestGenerateBatchSkipLogic:
             output = gen._build_output_path(emp)
             output.touch()
 
-        # Mock win32com at sys.modules level since it's imported inside generate_batch
-        mock_win32com = MagicMock()
-        with patch.dict("sys.modules", {"win32com": mock_win32com, "win32com.client": mock_win32com.client}):
-            results = gen.generate_batch(
-                employees=emps,
-                source_xls=Path("dummy.xls"),
-            )
+        results = gen.generate_batch(
+            employees=emps,
+            source_xls=Path("dummy.xls"),
+            batch_size=50,
+        )
 
         assert len(results) == 2
         assert all(r["skipped"] for r in results)

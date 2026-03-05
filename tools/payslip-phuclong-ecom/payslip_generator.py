@@ -19,6 +19,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from office.utils.com import com_initialized, get_win32com_client
+from office.utils.helpers import create_excel_background, safe_quit_excel
+
 from core.logger import get_logger
 from office.excel.utils import xlookup_to_index_match, fix_xlookup_formulas, XLOOKUP_PATTERN
 
@@ -97,8 +100,6 @@ class PayslipGenerator:
         Returns:
             List of result dicts with 'employee', 'xlsx_path', 'success'.
         """
-        import win32com.client as win32
-
         results = []
         total = len(employees)
 
@@ -145,7 +146,10 @@ class PayslipGenerator:
                     f"({len(chunk)} employees)"
                 )
 
-            excel = win32.Dispatch("Excel.Application")
+            com_ctx = com_initialized()
+            com_ctx.__enter__()
+
+            excel, was_already_running = create_excel_background()
             excel.Visible = False
             excel.DisplayAlerts = False
 
@@ -243,11 +247,9 @@ class PayslipGenerator:
 
                 wb.Close(SaveChanges=False)
             finally:
-                try:
-                    excel.Quit()
-                except Exception:
-                    pass
+                safe_quit_excel(excel, was_already_running)
                 del excel
+                com_ctx.__exit__(None, None, None)
                 gc.collect()
                 time.sleep(2)
 

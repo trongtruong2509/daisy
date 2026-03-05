@@ -21,7 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.config_manager import ConfigManager
 from core.console import cprint
-from office.outlook import get_outlook_accounts
+from office.outlook import OutlookClient
 
 
 # ── Outlook Account Functions ───────────────────────────────
@@ -30,13 +30,13 @@ def _prompt_for_outlook_account() -> str:
     """
     Prompt user to select Outlook account from configured profiles.
 
-    Uses get_outlook_accounts() from office.outlook module.
+    Uses OutlookClient.get_available_accounts() from office.outlook module.
     If no accounts found, falls back to manual email entry.
 
     Returns:
         Selected or entered email address.
     """
-    accounts = get_outlook_accounts()
+    accounts = OutlookClient.get_available_accounts()
 
     print()
     if not accounts:

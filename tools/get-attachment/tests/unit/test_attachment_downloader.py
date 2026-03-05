@@ -333,7 +333,7 @@ class TestAttachmentDownloaderRun:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.get_inbox_emails.return_value = []
 
-        with patch("attachment_downloader.OutlookClient", return_value=mock_client):
+        with patch("attachment_downloader.OutlookReader", return_value=mock_client):
             result = dl.run()
 
         assert result.emails_found == 0
@@ -353,7 +353,7 @@ class TestAttachmentDownloaderRun:
 
         saved_path = tmp_path / "report.xlsx"
 
-        with patch("attachment_downloader.OutlookClient", return_value=mock_client), \
+        with patch("attachment_downloader.OutlookReader", return_value=mock_client), \
              patch("attachment_downloader._retry_save", return_value=(saved_path, "saved")):
             result = dl.run()
 
@@ -375,7 +375,7 @@ class TestAttachmentDownloaderRun:
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.get_inbox_emails.return_value = [email]
 
-        with patch("attachment_downloader.OutlookClient", return_value=mock_client):
+        with patch("attachment_downloader.OutlookReader", return_value=mock_client):
             result = dl.run()
 
         assert result.emails_found == 1

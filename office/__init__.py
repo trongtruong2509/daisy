@@ -12,23 +12,28 @@ Key features:
 - All COM operations isolated here
 
 Usage:
-    from office.outlook import OutlookClient, EmailFilter
-    
-    with OutlookClient(account="your.email@company.com") as client:
-        emails = client.get_inbox_emails(
+    from office.outlook import OutlookReader, OutlookSender, EmailFilter
+
+    with OutlookReader(account="your.email@company.com") as reader:
+        emails = reader.get_inbox_emails(
             filter=EmailFilter(unread_only=True, limit=100)
         )
         for email in emails:
             print(email.subject)
+
+    # To list configured accounts without an instance:
+    accounts = OutlookClient.get_available_accounts()
 """
 
 from office.outlook.client import OutlookClient
+from office.outlook.reader import OutlookReader
 from office.outlook.models import (
     Email,
     EmailFilter,
     Attachment,
     FolderInfo,
     AccountInfo,
+    NewEmail,
 )
 from office.outlook.sender import OutlookSender
 from office.outlook.exceptions import (
@@ -41,12 +46,14 @@ from office.outlook.exceptions import (
 
 __all__ = [
     "OutlookClient",
+    "OutlookReader",
     "OutlookSender",
     "Email",
     "EmailFilter",
     "Attachment",
     "FolderInfo",
     "AccountInfo",
+    "NewEmail",
     "OutlookError",
     "OutlookConnectionError",
     "OutlookAccountNotFoundError",

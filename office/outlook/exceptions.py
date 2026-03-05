@@ -76,26 +76,3 @@ class OutlookItemError(OutlookError):
         super().__init__(message)
 
 
-class OutlookSaveError(OutlookError):
-    """Raised when saving an email fails."""
-    
-    def __init__(self, path: str, reason: str = None):
-        self.path = path
-        self.reason = reason
-        
-        message = f"Failed to save email to '{path}'"
-        if reason:
-            message += f": {reason}"
-        
-        super().__init__(message)
-
-
-class DryRunBlockedError(OutlookError):
-    """Raised when a mutation operation is attempted in dry-run mode."""
-    
-    def __init__(self, operation: str):
-        self.operation = operation
-        super().__init__(
-            f"Operation '{operation}' blocked in dry-run mode. "
-            "Set DRY_RUN=false to enable mutations."
-        )

@@ -19,13 +19,6 @@ class Importance(Enum):
     HIGH = 2
 
 
-class BodyFormat(Enum):
-    """Email body format types."""
-    PLAIN = 1
-    HTML = 2
-    RTF = 3
-
-
 @dataclass
 class AccountInfo:
     """

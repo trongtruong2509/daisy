@@ -94,16 +94,18 @@ class TestExcelReaderComInteraction:
 class TestPayslipGeneratorComInteraction:
     """Component tests for PayslipGenerator's COM lifecycle."""
 
-    def test_generate_batch_opens_workbook(self, tmp_path):
+    @patch("payslip_generator.com_initialized")
+    @patch("payslip_generator.create_excel_background")
+    @patch("payslip_generator.safe_quit_excel")
+    def test_generate_batch_opens_workbook(self, mock_safe_quit, mock_get_excel, mock_com_ctx, tmp_path):
         """Test that generate_batch opens the source workbook via COM."""
         from payslip_generator import PayslipGenerator
 
         gen = PayslipGenerator(tmp_path, "01/2026")
         emp = make_employee()
 
-        mock_win32com = MagicMock()
         mock_excel = MagicMock()
-        mock_win32com.client.Dispatch.return_value = mock_excel
+        mock_get_excel.return_value = (mock_excel, False)
         mock_wb = MagicMock()
         mock_excel.Workbooks.Open.return_value = mock_wb
 
@@ -112,14 +114,17 @@ class TestPayslipGeneratorComInteraction:
         data_ws.UsedRange.Rows.Count = 0
         mock_wb.Sheets.return_value = data_ws
 
+        # Mock com_initialized context manager
+        mock_com_ctx.return_value.__enter__ = MagicMock()
+        mock_com_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
         source = tmp_path / "source.xls"
         source.touch()
 
-        with patch.dict("sys.modules", {"win32com": mock_win32com, "win32com.client": mock_win32com.client}):
-            try:
-                gen.generate_batch([emp], source)
-            except Exception:
-                pass  # May fail on _generate_one, that's OK
+        try:
+            gen.generate_batch([emp], source, batch_size=50)
+        except Exception:
+            pass  # May fail on _generate_one, that's OK
 
         mock_excel.Workbooks.Open.assert_called_once()
 
@@ -134,9 +139,7 @@ class TestPayslipGeneratorComInteraction:
         for emp in emps:
             gen._build_output_path(emp).touch()
 
-        mock_win32com = MagicMock()
-        with patch.dict("sys.modules", {"win32com": mock_win32com, "win32com.client": mock_win32com.client}):
-            results = gen.generate_batch(emps, Path("dummy.xls"))
+        results = gen.generate_batch(emps, Path("dummy.xls"), batch_size=50)
 
         assert all(r["skipped"] for r in results)
 
@@ -184,7 +187,10 @@ class TestComFailureHandling:
         assert len(employees) == 1
         assert employees[0]["name"] == ""  # Name stays empty
 
-    def test_generator_handles_single_failure(self, tmp_path):
+    @patch("payslip_generator.com_initialized")
+    @patch("payslip_generator.create_excel_background")
+    @patch("payslip_generator.safe_quit_excel")
+    def test_generator_handles_single_failure(self, mock_safe_quit, mock_get_excel, mock_com_ctx, tmp_path):
         """Test that one employee failure doesn't stop others."""
         from payslip_generator import PayslipGenerator
 
@@ -192,6 +198,15 @@ class TestComFailureHandling:
 
         mock_excel = MagicMock()
         mock_wb = MagicMock()
+        mock_get_excel.return_value = (mock_excel, False)
+        mock_excel.Workbooks.Open.return_value = mock_wb
+
+        # Mock com_initialized context manager
+        mock_com_ctx.return_value.__enter__ = MagicMock()
+        mock_com_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+        data_ws = MagicMock()
+        mock_wb.Sheets.return_value = data_ws
 
         emps = make_employees(2)
 
@@ -206,16 +221,7 @@ class TestComFailureHandling:
 
         gen._generate_one = mock_generate_one
 
-        # Mock win32com at sys.modules level since it's imported inside generate_batch
-        mock_win32com = MagicMock()
-        mock_win32com.client.Dispatch.return_value = mock_excel
-        mock_excel.Workbooks.Open.return_value = mock_wb
-
-        data_ws = MagicMock()
-        mock_wb.Sheets.return_value = data_ws
-
-        with patch.dict("sys.modules", {"win32com": mock_win32com, "win32com.client": mock_win32com.client}):
-            results = gen.generate_batch(emps, Path("dummy.xls"))
+        results = gen.generate_batch(emps, Path("dummy.xls"), batch_size=50)
 
         assert len(results) == 2
         assert results[0]["success"] is True

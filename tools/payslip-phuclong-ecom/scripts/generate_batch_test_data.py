@@ -13,13 +13,14 @@ import sys
 import shutil
 from pathlib import Path
 
-try:
-    import win32com.client as win32
-    HAS_WIN32COM = True
-except ImportError:
-    HAS_WIN32COM = False
+# Ensure project root is importable
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-if not HAS_WIN32COM:
+from office.utils.com import is_available, get_win32com_client
+
+if not is_available():
     print("ERROR: pywin32 not available. Required for .xls files.")
     print("Install with: pip install pywin32")
     sys.exit(1)
@@ -70,7 +71,7 @@ def generate_batch_test_file(source_file: Path, output_file: Path, num_employees
     excel = None
     workbook = None
     try:
-        excel = win32.Dispatch("Excel.Application")
+        excel = get_win32com_client().DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
         excel.ScreenUpdating = False  # Disable screen updates for speed

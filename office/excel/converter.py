@@ -21,6 +21,9 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
+from office.utils.com import com_initialized, ensure_com_available, get_win32com_client
+from office.utils.helpers import create_excel_background, safe_quit_excel
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +57,8 @@ class PdfConverter:
 
         self._excel = None
         self._initialized = False
+        self._was_already_running = False
+        self._com_ctx = None
 
     def __enter__(self):
         self._init_excel()
@@ -69,9 +74,12 @@ class PdfConverter:
             return
 
         try:
-            import win32com.client as win32
+            ensure_com_available()
 
-            self._excel = win32.Dispatch("Excel.Application")
+            self._com_ctx = com_initialized()
+            self._com_ctx.__enter__()
+
+            self._excel, self._was_already_running = create_excel_background()
             self._excel.Visible = False
             self._excel.DisplayAlerts = False
             self._initialized = True
@@ -80,14 +88,14 @@ class PdfConverter:
             logger.error(f"Failed to initialize Excel COM: {e}")
 
     def _cleanup_excel(self) -> None:
-        """Quit Excel COM."""
-        if self._excel:
-            try:
-                self._excel.Quit()
-            except Exception:
-                pass
-            self._excel = None
-            self._initialized = False
+        """Release Excel COM resources."""
+        safe_quit_excel(self._excel, self._was_already_running)
+        self._excel = None
+        self._initialized = False
+
+        if self._com_ctx:
+            self._com_ctx.__exit__(None, None, None)
+            self._com_ctx = None
 
     def convert_to_pdf(
         self,

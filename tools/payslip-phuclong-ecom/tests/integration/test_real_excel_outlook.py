@@ -35,27 +35,29 @@ class TestRealExcelCom:
     @pytest.mark.skip(reason="Requires real Excel installation — run manually")
     def test_excel_com_opens_workbook(self):
         """Verify Excel COM can open and read a workbook."""
-        import win32com.client
+        from office.utils.com import com_initialized, get_win32com_client
+        from office.utils.helpers import create_excel_background, safe_quit_excel
 
-        excel = win32com.client.Dispatch("Excel.Application")
-        excel.Visible = False
-        excel.DisplayAlerts = False
+        with com_initialized():
+            excel, was_running = create_excel_background()
+            excel.Visible = False
+            excel.DisplayAlerts = False
 
-        try:
-            # Update path to your test Excel file
-            test_file = TOOL_DIR / "tests" / "fixtures" / "test_payslip.xls"
-            if not test_file.exists():
-                pytest.skip(f"Test file not found: {test_file}")
+            try:
+                # Update path to your test Excel file
+                test_file = TOOL_DIR / "tests" / "fixtures" / "test_payslip.xls"
+                if not test_file.exists():
+                    pytest.skip(f"Test file not found: {test_file}")
 
-            wb = excel.Workbooks.Open(str(test_file.resolve()))
-            ws = wb.Sheets("Data")
+                wb = excel.Workbooks.Open(str(test_file.resolve()))
+                ws = wb.Sheets("Data")
 
-            # Should have at least header + 1 employee
-            assert ws.Range("A4").Value is not None
+                # Should have at least header + 1 employee
+                assert ws.Range("A4").Value is not None
 
-            wb.Close(SaveChanges=False)
-        finally:
-            excel.Quit()
+                wb.Close(SaveChanges=False)
+            finally:
+                safe_quit_excel(excel, was_running)
 
     @pytest.mark.skip(reason="Requires real Excel installation — run manually")
     def test_pdf_generation_and_password(self):

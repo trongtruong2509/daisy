@@ -34,34 +34,19 @@ Usage:
 """
 
 import logging
-from pathlib import Path
-from typing import List, Optional
-
-# COM imports
-try:
-    import win32com.client
-    import pywintypes
-    import pythoncom
-    HAS_WIN32COM = True
-except ImportError:
-    HAS_WIN32COM = False
-    pythoncom = None
+from typing import List, Optional, Tuple
 
 from core.retry import retry_operation, RetryConfig
-from core.state import ContentHashTracker, StateTracker
+from core.state import StateTracker
+from office.outlook.client import OutlookClient
 from office.outlook.exceptions import (
-    OutlookConnectionError,
-    OutlookAccountNotFoundError,
-    OutlookSendError,
-    DryRunBlockedError,
-    OutlookError,
-)
+    OutlookSendError)
 from office.outlook.models import NewEmail
 
 logger = logging.getLogger(__name__)
 
 
-class OutlookSender:
+class OutlookSender(OutlookClient):
     """
     Outlook email sender with safety controls.
     
@@ -98,30 +83,15 @@ class OutlookSender:
             state_tracker: Optional state tracker for duplicate prevention.
             retry_config: Retry configuration for COM operations.
         """
-        if not HAS_WIN32COM:
-            raise ImportError(
-                "win32com is required for Outlook operations. "
-                "Install pywin32: pip install pywin32"
-            )
-        
-        self.account = account
+        super().__init__(account, retry_config)
         self.dry_run = dry_run
         self.state_tracker = state_tracker
-        self.retry_config = retry_config or RetryConfig(
-            max_attempts=3,
-            base_delay=2.0
-        )
-        
-        self._outlook: Optional[object] = None
-        self._namespace: Optional[object] = None
-        self._account_obj: Optional[object] = None
-        self._connected = False
-        
+
         # Statistics
         self.sent_count = 0
         self.skipped_count = 0
         self.error_count = 0
-        
+
         if dry_run:
             logger.warning("DRY-RUN MODE: No emails will actually be sent")
     
@@ -132,8 +102,8 @@ class OutlookSender:
     
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         """Clean up on context exit."""
-        self.disconnect()
-        
+        super().__exit__(exc_type, exc_val, exc_tb)
+
         # Save state tracker if present
         if self.state_tracker:
             self.state_tracker.save()
@@ -145,91 +115,6 @@ class OutlookSender:
         )
         
         return False
-    
-    @retry_operation()
-    def connect(self) -> None:
-        """
-        Connect to Outlook.
-        
-        Raises:
-            OutlookConnectionError: If unable to connect.
-            OutlookAccountNotFoundError: If account not found.
-        """
-        if self._connected:
-            return
-        
-        logger.info(f"[ACCOUNT-LOOKUP] Looking for account: {self.account}")
-        logger.debug("Connecting to Outlook...")
-        
-        try:
-            # Initialize COM for this thread
-            if pythoncom:
-                pythoncom.CoInitialize()
-            
-            self._outlook = win32com.client.Dispatch("Outlook.Application")
-            self._namespace = self._outlook.GetNamespace("MAPI")
-        except pywintypes.com_error as e:
-            raise OutlookConnectionError(
-                f"Failed to connect to Outlook: {e}"
-            )
-        
-        # Find the account
-        self._account_obj = self._find_account()
-        found_smtp = getattr(self._account_obj, "SmtpAddress", "UNKNOWN")
-        self._connected = True
-        
-        logger.info(f"[ACCOUNT-FOUND] ✓ Successfully connected with account: {found_smtp}")
-    
-    def _find_account(self) -> object:
-        """
-        Find the specified account in Outlook.
-        
-        Returns:
-            Account COM object.
-            
-        Raises:
-            OutlookAccountNotFoundError: If account not found.
-        """
-        available = []
-        
-        try:
-            total_accounts = self._namespace.Accounts.Count
-            logger.info(f"[ACCOUNT-SEARCH] Total accounts in Outlook: {total_accounts}")
-            
-            for i in range(1, total_accounts + 1):
-                acc = self._namespace.Accounts.Item(i)
-                smtp = getattr(acc, "SmtpAddress", "")
-                available.append(smtp)
-                
-                match = "✓ MATCH" if smtp.lower() == self.account.lower() else ""
-                logger.info(f"[ACCOUNT-SEARCH] Account [{i}] = '{smtp}' {match}")
-                
-                if smtp.lower() == self.account.lower():
-                    logger.info(f"[ACCOUNT-SELECTED] ✓ Found requested account: {smtp}")
-                    return acc
-            
-            # No match found
-            logger.error(
-                f"[ACCOUNT-ERROR] Account '{self.account}' not found in Outlook.\n"
-                f"[ACCOUNT-ERROR] Available accounts: {', '.join(available)}"
-            )
-        except Exception as e:
-            logger.error(f"[ACCOUNT-ERROR] Error finding account: {e}", exc_info=True)
-        
-        raise OutlookAccountNotFoundError(self.account, available)
-    
-    def disconnect(self) -> None:
-        """Disconnect from Outlook."""
-        self._outlook = None
-        self._namespace = None
-        self._account_obj = None
-        self._connected = False
-        logger.debug("Disconnected from Outlook")
-    
-    def _ensure_connected(self) -> None:
-        """Ensure connected to Outlook."""
-        if not self._connected:
-            self.connect()
     
     def is_duplicate(self, email: NewEmail) -> bool:
         """
@@ -337,8 +222,11 @@ class OutlookSender:
         Debug-log the mail item's current parent folder path.
 
         Helps pinpoint which COM operation triggers an account re-bind on Exchange.
-        Only logs at DEBUG level so production logs stay clean.
+        Guarded by isEnabledFor(DEBUG) so COM accessors are never invoked in
+        production when debug logging is off.
         """
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
         try:
             parent = getattr(mail, "Parent", None)
             path = parent.FolderPath if parent else "(no parent yet)"
@@ -522,7 +410,7 @@ class OutlookSender:
         self,
         emails: List[NewEmail],
         continue_on_error: bool = True
-    ) -> tuple[int, int, int]:
+    ) -> Tuple[int, int, int]:
         """
         Send multiple emails.
         

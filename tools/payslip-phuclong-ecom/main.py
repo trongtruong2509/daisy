@@ -407,69 +407,63 @@ def send_emails(config, results, composed):
 
 def main():
     """Main entry point."""
-    import pythoncom
-    pythoncom.CoInitialize()
+    from office.utils.com import com_initialized
 
-    start_time = time.time()
-    cprint_banner(
-        "Payslip Generator & Distributor - Phuc Long",
-        "Excel COM | Outlook | Daisy Platform",
-    )
+    with com_initialized():
+        start_time = time.time()
+        cprint_banner(
+            "Payslip Generator & Distributor - Phuc Long",
+            "Excel COM | Outlook | Daisy Platform",
+        )
 
-    # Load Configuration
-    tool_dir = Path(__file__).resolve().parent
-    config = load_and_validate_config(tool_dir)
+        # Load Configuration
+        tool_dir = Path(__file__).resolve().parent
+        config = load_and_validate_config(tool_dir)
 
-    # Read Employee Data
-    employees, email_template, subject = read_employee_data(config)
+        # Read Employee Data
+        employees, email_template, subject = read_employee_data(config)
 
-    # Check Existing State
-    check_and_handle_existing_state(config, len(employees))
+        # Check Existing State
+        check_and_handle_existing_state(config, len(employees))
 
-    # Validate Data
-    validate_employee_data(employees, config)
+        # Validate Data
+        validate_employee_data(employees, config)
 
-    # Show Summary & Get Confirmation
-    show_summary_and_confirm(config, employees)
-    cleanup_output_files(config)
+        # Show Summary & Get Confirmation
+        show_summary_and_confirm(config, employees)
+        cleanup_output_files(config)
 
-    # Generate Payslips
-    results = generate_payslips(config, employees)
-    generated = sum(1 for r in results if r["success"] and not r.get("skipped"))
-    gen_skipped = sum(1 for r in results if r.get("skipped"))
+        # Generate Payslips
+        results = generate_payslips(config, employees)
+        generated = sum(1 for r in results if r["success"] and not r.get("skipped"))
+        gen_skipped = sum(1 for r in results if r.get("skipped"))
 
-    # Convert to PDF
-    results = convert_to_pdf(config, results)
-    converted = sum(1 for r in results if r.get("pdf_path"))
-    pdf_skipped = sum(1 for r in results if r.get("pdf_skipped"))
+        # Convert to PDF
+        results = convert_to_pdf(config, results)
+        converted = sum(1 for r in results if r.get("pdf_path"))
+        pdf_skipped = sum(1 for r in results if r.get("pdf_skipped"))
 
-    # Compose & Send Emails
-    results, composed = compose_emails(config, results, email_template, subject)
-    sent_count, skipped_count, error_count, result_file = send_emails(config, results, composed)
+        # Compose & Send Emails
+        results, composed = compose_emails(config, results, email_template, subject)
+        sent_count, skipped_count, error_count, result_file = send_emails(config, results, composed)
 
-    # Post-Execution Summary
-    elapsed = time.time() - start_time
-    cprint_summary_box(
-        "FINAL SUMMARY",
-        {
-            "Total employees": len(employees),
-            "Generated": generated,
-            "Gen skipped": gen_skipped,
-            "Converted to PDF": converted,
-            "PDF skipped": pdf_skipped,
-            "Emails sent": sent_count,
-            "Emails skipped": skipped_count,
-            "Errors": error_count,
-            "Elapsed": f"{elapsed:.1f}s",
-            "Result file": str(result_file),
-        },
-    )
-
-    # Release COM apartment
-    try:
-        pythoncom.CoUninitialize()
-    except Exception:
-        pass
+        # Post-Execution Summary
+        elapsed = time.time() - start_time
+        cprint_summary_box(
+            "FINAL SUMMARY",
+            {
+                "Total employees": len(employees),
+                "Generated": generated,
+                "Gen skipped": gen_skipped,
+                "Converted to PDF": converted,
+                "PDF skipped": pdf_skipped,
+                "Emails sent": sent_count,
+                "Emails skipped": skipped_count,
+                "Errors": error_count,
+                "Elapsed": f"{elapsed:.1f}s",
+                "Result file": str(result_file),
+            },
+        )
 
     if error_count > 0:
         cprint(f"WARNING: {error_count} error(s) occurred. Check logs for details.", level="WARNING")
