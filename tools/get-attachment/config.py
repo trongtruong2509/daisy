@@ -89,6 +89,10 @@ class GetAttachmentConfig:
     # Outlook account to use
     outlook_account: str = ""
 
+    # Outlook folder path (e.g. "Inbox/SubFolder1/SubFolder2")
+    # Empty string means default Inbox
+    outlook_folder: str = ""
+
     # Search criteria — date range from start_date to end_date (inclusive)
     # Dates in DD/MM/YYYY format
     start_date: str = ""
@@ -231,8 +235,11 @@ def load_config(tool_dir: Optional[Path] = None) -> "GetAttachmentConfig":
         Path(save_path_raw) if save_path_raw else tool_dir / "attachments"
     )
 
+    outlook_folder = mgr.get("OUTLOOK_FOLDER", "")
+
     config = GetAttachmentConfig(
         outlook_account=outlook_account,
+        outlook_folder=outlook_folder,
         start_date=start_date,
         end_date=end_date_raw,
         subject_keywords=subject_keywords,
@@ -282,6 +289,27 @@ def load_config(tool_dir: Optional[Path] = None) -> "GetAttachmentConfig":
                 config.end_date = raw
                 break
             cprint(f"Invalid date: {msg}", level="ERROR")
+
+    # OUTLOOK_FOLDER — always prompt so user can change each run
+    # Show current value (from .env) and allow user to confirm or re-enter
+    print()
+    current_folder = config.outlook_folder or "Inbox"
+    cprint(
+        "Enter the Outlook folder path to read attachments from "
+        "(e.g. Inbox/SubFolder1/SubFolder2).",
+        level="WARNING",
+    )
+    cprint(
+        f"Leave blank to use the current value: {current_folder}",
+        level="INFO",
+    )
+    folder_input = input("OUTLOOK_FOLDER: ").strip()
+    if folder_input:
+        config.outlook_folder = folder_input
+        # Save to .env for next time
+        ConfigManager.save_to_env(local_env, "OUTLOOK_FOLDER", folder_input)
+    elif not config.outlook_folder:
+        config.outlook_folder = "Inbox"
 
     # Subject keywords are optional; prompt only if not set in env
     if not keywords_raw:

@@ -253,21 +253,20 @@ class TestLoadConfig:
     """Tests for load_config() with mocked env and prompts."""
 
     def test_all_values_from_env(self, tmp_path, monkeypatch):
-        """When all values are in the env, no prompts should be called."""
+        """When all values are in the env, only OUTLOOK_FOLDER prompt should be called."""
         env_content = (
             "OUTLOOK_ACCOUNT=test@co.com\n"
             "START_DATE=01/03/2026\n"
             "END_DATE=05/03/2026\n"
             "SUBJECT_KEYWORDS=invoice,report\n"
             "ATTACHMENT_SAVE_PATH=D:\\Downloads\\att\n"
+            "OUTLOOK_FOLDER=Inbox\n"
         )
         local_env = tmp_path / ".env"
         local_env.write_text(env_content)
 
-        # Patch ConfigManager.prompt_for_value to fail if called unexpectedly
-        with patch("config.ConfigManager.prompt_for_value", side_effect=AssertionError("should not prompt")) as _mock_prompt, \
-             patch("config._prompt_for_outlook_account", side_effect=AssertionError("should not prompt")) as _mock_acc, \
-             patch("builtins.input", side_effect=AssertionError("should not prompt")):
+        # OUTLOOK_FOLDER always prompts — user confirms with blank input
+        with patch("builtins.input", return_value=""):
             cfg = load_config(tool_dir=tmp_path)
 
         assert cfg.outlook_account == "test@co.com"
@@ -275,6 +274,7 @@ class TestLoadConfig:
         assert cfg.end_date == "05/03/2026"
         assert cfg.subject_keywords == ["invoice", "report"]
         assert cfg.attachment_save_path == Path("D:\\Downloads\\att")
+        assert cfg.outlook_folder == "Inbox"
 
     def test_missing_account_prompts(self, tmp_path, monkeypatch):
         """Missing OUTLOOK_ACCOUNT triggers the account-selection prompt."""

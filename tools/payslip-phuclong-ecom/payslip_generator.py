@@ -16,6 +16,7 @@ correct values regardless of formula complexity (VLOOKUP, XLOOKUP, etc.).
 import gc
 import re
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -23,6 +24,7 @@ from office.utils.com import com_initialized, get_win32com_client
 from office.utils.helpers import create_excel_background, safe_quit_excel
 
 from core.logger import get_logger
+from core.retry import retry_with_backoff, RetryConfig
 from office.excel.utils import xlookup_to_index_match, fix_xlookup_formulas, XLOOKUP_PATTERN
 
 logger = get_logger(__name__)
@@ -57,11 +59,50 @@ class PayslipGenerator:
         self.year = parts[1] if len(parts) >= 2 else ""
         self.mmyyyy = self.month + self.year
 
-    def _build_output_path(self, employee: Dict[str, Any]) -> Path:
-        """Build the expected output file path for an employee's payslip."""
+    @staticmethod
+    def _build_name_suffix_map(employees: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Build a mapping from employee MNV to filename suffix for duplicate names.
+
+        Employees with unique names get no suffix. When multiple employees
+        share the same name, they get '_1', '_2', etc. suffixes.
+
+        Returns:
+            Dict mapping MNV -> suffix string (empty for unique names).
+        """
+        # Count occurrences of each name
+        name_counter: Counter = Counter()
+        for emp in employees:
+            name = emp.get("name", "").strip()
+            if name:
+                name_counter[name] += 1
+
+        # Assign suffixes for duplicate names
+        suffix_map: Dict[str, str] = {}
+        name_index: Dict[str, int] = {}
+        for emp in employees:
+            mnv = emp.get("mnv", "")
+            name = emp.get("name", "").strip()
+            if name and name_counter[name] > 1:
+                idx = name_index.get(name, 0) + 1
+                name_index[name] = idx
+                suffix_map[mnv] = f"_{idx}"
+            else:
+                suffix_map[mnv] = ""
+        return suffix_map
+
+    def _build_output_path(self, employee: Dict[str, Any], name_suffix: str = "") -> Path:
+        """Build the expected output file path for an employee's payslip.
+
+        Args:
+            employee: Employee data dict with 'name', 'mnv' keys.
+            name_suffix: Optional suffix to disambiguate employees with the
+                         same name (e.g. '_1', '_2'). Empty for unique names.
+        """
         name = employee.get("name", "")
         mnv = employee.get("mnv", "")
         safe_name = re.sub(r'[\\/*?:"<>|]', "_", name) if name else mnv
+        if name_suffix:
+            safe_name = f"{safe_name}{name_suffix}"
         filename = (
             self.filename_pattern
             .replace("{name}", safe_name)
@@ -103,16 +144,29 @@ class PayslipGenerator:
         results = []
         total = len(employees)
 
+        # Build suffix map for employees with duplicate names
+        suffix_map = self._build_name_suffix_map(employees)
+        if any(s for s in suffix_map.values()):
+            dup_names = {
+                emp.get("name") for emp in employees
+                if suffix_map.get(emp.get("mnv", ""))
+            }
+            logger.info(
+                f"Duplicate name handling: {len(dup_names)} name(s) have "
+                f"multiple employees, adding suffixes to filenames"
+            )
+
         # Resume optimization: skip Excel COM entirely if all files exist
         needs_generation = any(
-            not self._build_output_path(emp).exists()
-            and not self._build_output_path(emp).with_suffix(".pdf").exists()
+            not self._build_output_path(emp, suffix_map.get(emp.get("mnv", ""), "")).exists()
+            and not self._build_output_path(emp, suffix_map.get(emp.get("mnv", ""), "")).with_suffix(".pdf").exists()
             for emp in employees
         )
         if not needs_generation:
             logger.info("All payslips already exist, skipping Excel COM")
             for i, emp in enumerate(employees, 1):
-                output_path = self._build_output_path(emp)
+                suffix = suffix_map.get(emp.get("mnv", ""), "")
+                output_path = self._build_output_path(emp, suffix)
                 results.append({
                     "employee": emp,
                     "xlsx_path": output_path if output_path.exists() else None,
@@ -198,9 +252,10 @@ class PayslipGenerator:
                     global_i = processed_count
                     mnv = emp.get("mnv", "")
                     name = emp.get("name", "")
+                    suffix = suffix_map.get(mnv, "")
 
                     # Resume support: skip if output already exists
-                    output_path = self._build_output_path(emp)
+                    output_path = self._build_output_path(emp, suffix)
                     if output_path.exists() or output_path.with_suffix(".pdf").exists():
                         logger.debug(
                             f"[{global_i}/{total}] Skipping {name} - output already exists"
@@ -221,7 +276,8 @@ class PayslipGenerator:
 
                     try:
                         xlsx_path = self._generate_one(
-                            excel, wb, template_sheet, data_sheet, col_mnv, emp
+                            excel, wb, template_sheet, data_sheet, col_mnv, emp,
+                            name_suffix=suffix,
                         )
                         results.append({
                             "employee": emp,
@@ -274,6 +330,7 @@ class PayslipGenerator:
         data_sheet: str,
         col_mnv: str,
         employee: Dict[str, Any],
+        name_suffix: str = "",
     ) -> Optional[Path]:
         """
         Generate a single payslip by setting B3=MNV and copying the sheet.
@@ -291,7 +348,7 @@ class PayslipGenerator:
         row = employee.get("row", 0)
 
         # Build output filename
-        output_path = self._build_output_path(employee)
+        output_path = self._build_output_path(employee, name_suffix)
 
         # Step 1: Set TBKQ!B3 = MNV from Data sheet
         data_ws = source_wb.Sheets(data_sheet)
@@ -410,10 +467,22 @@ class PayslipGenerator:
             f"C10={_cell_repr(new_ws,'C10')}, D10={_cell_repr(new_ws,'D10')}"
         )
 
-        # Step 4: Paste as values — captures current cell state into literal values
-        new_ws.Cells.Copy()
-        new_ws.Range("A1").PasteSpecial(Paste=-4163)  # xlPasteValues
-        excel.CutCopyMode = False
+        # Step 4: Paste as values — captures current cell state into literal values.
+        # This can intermittently fail with "PasteSpecial method of Range class
+        # failed" (-2147352567). Retry with short delay to handle this transient
+        # COM error.
+        _paste_retry = RetryConfig(max_attempts=3, base_delay=1.0, max_delay=5.0)
+
+        def _copy_paste_as_values():
+            new_ws.Cells.Copy()
+            new_ws.Range("A1").PasteSpecial(Paste=-4163)  # xlPasteValues
+            excel.CutCopyMode = False
+
+        retry_with_backoff(
+            _copy_paste_as_values,
+            config=_paste_retry,
+            operation_name=f"PasteSpecial for {name} (MNV: {mnv})",
+        )
 
         # Restore automatic calculation
         try:

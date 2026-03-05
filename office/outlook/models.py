@@ -59,6 +59,13 @@ class FolderInfo:
         return self.path
 
 
+# Outlook attachment type constants (OlAttachmentType)
+ATTACH_BY_VALUE = 1       # olByValue - regular file attachment
+ATTACH_BY_REFERENCE = 4   # olByReference - shortcut to file
+ATTACH_EMBEDDED_ITEM = 5  # olEmbeddeditem - embedded Outlook item
+ATTACH_OLE = 6            # olOLE - OLE object
+
+
 @dataclass
 class Attachment:
     """
@@ -68,12 +75,33 @@ class Attachment:
         filename: Name of the attachment file.
         size: Size in bytes.
         content_type: MIME type of the attachment.
+        attachment_type: Outlook attachment type constant (1=file, 5=embedded, 6=OLE).
+        content_id: Content-ID for inline/embedded images (CID reference in HTML).
         _com_attachment: Internal reference to COM object (not for external use).
     """
     filename: str
     size: int
     content_type: str = ""
+    attachment_type: int = ATTACH_BY_VALUE
+    content_id: str = ""
     _com_attachment: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def is_inline(self) -> bool:
+        """
+        Check if this attachment is an inline/embedded image.
+        
+        Inline attachments are referenced in the HTML body via CID and
+        are typically header/footer images, logos, or signature graphics.
+        They are not intended to be saved as standalone files.
+        """
+        # Has a Content-ID = inline image referenced in HTML body
+        if self.content_id:
+            return True
+        # OLE embedded objects are not regular file attachments
+        if self.attachment_type == ATTACH_OLE:
+            return True
+        return False
     
     def save(self, directory: Path) -> Path:
         """

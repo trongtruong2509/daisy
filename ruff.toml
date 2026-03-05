@@ -1,0 +1,68 @@
+# Ruff configuration for Daisy Automation Platform
+# https://docs.astral.sh/ruff/
+
+# Target Python version
+target-version = "py310"
+
+# Line length
+line-length = 120
+
+# Exclude paths
+exclude = [
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "*.egg-info",
+    "node_modules",
+    "build",
+    "dist",
+]
+
+[lint]
+# Enable rules
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import ordering)
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",    # line too long (handled by line-length setting)
+    "B008",    # do not perform function calls in argument defaults
+    "SIM108",  # use ternary operator (can reduce readability)
+    "RUF012",  # mutable class variables (dataclass fields are fine)
+    "UP007",   # use X | Y for union types (keep Optional for clarity)
+    "N802",    # function name should be lowercase (COM methods like SaveAs)
+    "N803",    # argument name should be lowercase (COM params like FileFormat)
+    "N806",    # variable in function should be lowercase (COM objects like Workbooks)
+    "N815",    # mixedCase variable in class scope (COM conventions)
+    "N816",    # mixedCase variable in global scope
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+[lint.isort]
+# isort configuration
+known-first-party = ["core", "office", "parsing", "tools"]
+
+[lint.per-file-ignores]
+# Tests can use assertions and be more relaxed
+"**/tests/**/*.py" = ["B011", "SIM300"]
+# Scripts can use print
+"**/scripts/**/*.py" = ["T201"]
+
+[format]
+# Use double quotes
+quote-style = "double"
+# Use spaces for indentation
+indent-style = "space"

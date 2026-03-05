@@ -52,6 +52,7 @@ def make_attachment(filename: str, save_side_effect=None) -> MagicMock:
     att = MagicMock()
     att.filename = filename
     att.size = 100
+    att.is_inline = False  # Regular file attachment by default
     if save_side_effect:
         att._com_attachment.SaveAsFile.side_effect = save_side_effect
     return att
@@ -331,7 +332,8 @@ class TestAttachmentDownloaderRun:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get_inbox_emails.return_value = []
+        mock_client.get_inbox.return_value = MagicMock()
+        mock_client.get_emails_from_folder.return_value = []
 
         with patch("attachment_downloader.OutlookReader", return_value=mock_client):
             result = dl.run()
@@ -349,7 +351,8 @@ class TestAttachmentDownloaderRun:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get_inbox_emails.return_value = [email]
+        mock_client.get_inbox.return_value = MagicMock()
+        mock_client.get_emails_from_folder.return_value = [email]
 
         saved_path = tmp_path / "report.xlsx"
 
@@ -373,7 +376,8 @@ class TestAttachmentDownloaderRun:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get_inbox_emails.return_value = [email]
+        mock_client.get_inbox.return_value = MagicMock()
+        mock_client.get_emails_from_folder.return_value = [email]
 
         with patch("attachment_downloader.OutlookReader", return_value=mock_client):
             result = dl.run()

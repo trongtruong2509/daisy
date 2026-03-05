@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.console import cprint
 from core.retry import retry_operation, RetryConfig
 from office.outlook.reader import OutlookReader
+from office.outlook.exceptions import OutlookFolderNotFoundError
 from office.outlook.models import Email, EmailFilter, Attachment
 
 logger = logging.getLogger(__name__)
@@ -244,13 +245,33 @@ class AttachmentDownloader:
 
         with OutlookReader(account=self.config.outlook_account) as client:
             cprint("Connected to Outlook", level="SUCCESS")
+
+            # Resolve folder: use configured path or default to Inbox
+            folder_path = getattr(self.config, "outlook_folder", "") or ""
+            if folder_path and folder_path.lower() != "inbox":
+                cprint(f"Navigating to folder: {folder_path}", level="INFO")
+                try:
+                    target_folder = client.get_folder_by_path(folder_path)
+                except OutlookFolderNotFoundError:
+                    cprint(
+                        f"Folder not found: '{folder_path}'. "
+                        "Please check the folder path and try again.",
+                        level="ERROR",
+                    )
+                    logger.error(f"Folder not found: {folder_path}")
+                    return result
+                folder_display = folder_path
+            else:
+                target_folder = client.get_inbox()
+                folder_display = "Inbox"
+
             cprint(
-                f"Searching Inbox for emails from {self.config.start_date} "
+                f"Searching {folder_display} for emails from {self.config.start_date} "
                 f"to {self.config.date_range_display.split(' \u2192 ')[-1]}...",
                 level="INFO",
             )
 
-            emails = client.get_inbox_emails(filter=email_filter)
+            emails = client.get_emails_from_folder(target_folder, filter=email_filter)
             result.emails_found = len(emails)
             cprint(
                 f"Found {len(emails)} email(s) in range {self.config.date_range_display}",
@@ -324,6 +345,15 @@ class AttachmentDownloader:
         )
 
         for attachment in email.attachments:
+            # Skip inline/embedded images (header/footer logos, signature graphics)
+            if attachment.is_inline:
+                logger.debug(
+                    "Skipped inline attachment: '%s' (type=%d, cid='%s')",
+                    attachment.filename,
+                    attachment.attachment_type,
+                    attachment.content_id,
+                )
+                continue
             self._save_one_attachment(attachment, email, result)
 
     def _save_one_attachment(

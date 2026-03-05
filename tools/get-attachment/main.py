@@ -51,6 +51,39 @@ def _confirm_proceed() -> bool:
             return False
         print("  Please enter 'yes' or 'no'.")
 
+def _prompt_clear_output_dir(save_path: Path) -> None:
+    """If the save directory already contains files, ask the user whether to
+    delete them before downloading.  Choosing 'no' keeps the existing files and
+    new downloads will overwrite any with the same name."""
+    if not save_path.exists():
+        return
+
+    existing = [p for p in save_path.iterdir() if p.is_file()]
+    if not existing:
+        return
+
+    print()
+    cprint(
+        f"Save directory already contains {len(existing)} file(s): {save_path}",
+        level="WARNING",
+    )
+    cprint("Delete all existing files before downloading? (yes/no)", level="WARNING")
+    cprint("  yes — delete all files then download", level="INFO")
+    cprint("  no  — keep existing files; new downloads overwrite on name clash", level="INFO")
+    while True:
+        answer = input("→ ").strip().lower()
+        if answer in ("yes", "y"):
+            for f in existing:
+                try:
+                    f.unlink()
+                except OSError as exc:
+                    cprint(f"Could not delete {f.name}: {exc}", level="WARNING")
+            cprint(f"Deleted {len(existing)} file(s).", level="SUCCESS")
+            return
+        if answer in ("no", "n"):
+            cprint("Keeping existing files. Duplicates will be overwritten.", level="INFO")
+            return
+        print("  Please enter 'yes' or 'no'.")
 
 def _show_config_summary(config) -> None:
     """Print a compact configuration summary before proceeding."""
@@ -64,6 +97,7 @@ def _show_config_summary(config) -> None:
         "Get Attachment \u2014 Run Summary",
         {
             "Outlook account": config.outlook_account,
+            "Outlook folder": config.outlook_folder or "Inbox",
             "Start date": config.start_date,
             "End date": end_display,
             "Subject keywords": keywords_display,
@@ -143,6 +177,10 @@ def main() -> None:
         config.attachment_save_path,
     )
 
+     # Check whether to clear the output directory before downloading
+    _prompt_clear_output_dir(config.attachment_save_path)
+    print()
+
     # 3. Summary + confirmation
     print()
     _show_config_summary(config)
@@ -152,8 +190,6 @@ def main() -> None:
         cprint("Aborted by user.", level="INFO")
         logger.info("Run aborted by user at confirmation prompt.")
         sys.exit(0)
-
-    print()
 
     # 4. Download attachments
     try:

@@ -397,10 +397,23 @@ class OutlookReader(OutlookClient):
         try:
             for i in range(1, item.Attachments.Count + 1):
                 att = item.Attachments.Item(i)
+
+                # Read Content-ID for inline image detection
+                content_id = ""
+                try:
+                    PR_ATTACH_CONTENT_ID = "http://schemas.microsoft.com/mapi/proptag/0x3712001F"
+                    cid = att.PropertyAccessor.GetProperty(PR_ATTACH_CONTENT_ID)
+                    if cid:
+                        content_id = str(cid)
+                except Exception:
+                    pass
+
                 attachments.append(Attachment(
                     filename=getattr(att, "FileName", f"attachment_{i}"),
                     size=getattr(att, "Size", 0),
                     content_type=getattr(att, "ContentType", ""),
+                    attachment_type=getattr(att, "Type", 1),
+                    content_id=content_id,
                     _com_attachment=att,
                 ))
         except Exception as e:

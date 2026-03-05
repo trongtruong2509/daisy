@@ -405,6 +405,101 @@ def send_emails(config, results, composed):
     return sent_count, skipped_count, error_count, result_file
 
 
+def check_reuse_existing_pdfs(config, employees):
+    """Check for existing PDFs from a previous run and ask user to reuse them.
+
+    If PDFs already exist in the output directory (e.g. from a previous dry-run
+    with KEEP_PDF_PAYSLIPS=true), prompt the user to reuse them instead of
+    regenerating from scratch. This saves significant time.
+
+    Returns:
+        True if user wants to reuse existing PDFs, False otherwise.
+    """
+    if not config.output_dir.exists():
+        return False
+
+    existing_pdfs = list(config.output_dir.glob("*.pdf"))
+    if not existing_pdfs:
+        return False
+
+    # Check how many employees already have PDFs
+    pdf_names = {p.stem.lower() for p in existing_pdfs}
+    matched = 0
+    for emp in employees:
+        name = emp.get("name", "")
+        # Check if a PDF matching the filename pattern exists
+        # Pattern is like TBKQ_{name}_{mmyyyy}
+        expected_stem = (
+            config.pdf_filename_pattern
+            .replace("{name}", name)
+            .replace("{mmyyyy}", config.date_mmyyyy)
+        ).lower()
+        if expected_stem in pdf_names:
+            matched += 1
+
+    if matched == 0:
+        return False
+
+    print()
+    cprint("Existing PDFs Detected", level="WARNING")
+    cprint(
+        f"Found {len(existing_pdfs)} PDF(s) in output directory, "
+        f"{matched}/{len(employees)} match current employees.",
+        level="INFO",
+        indent=2,
+    )
+    cprint(
+        "Reuse existing PDFs? (yes = skip generation & conversion, no = regenerate)",
+        level="WARNING",
+    )
+    while True:
+        answer = input("  Reuse PDFs? (yes/no): ").strip().lower()
+        if answer in ("yes", "y"):
+            cprint("Reusing existing PDFs. Skipping generation & conversion.", level="SUCCESS")
+            return True
+        if answer in ("no", "n"):
+            return False
+        print("  Please enter 'yes' or 'no'.")
+
+
+def build_results_from_existing_pdfs(config, employees):
+    """Build result dicts from existing PDFs for the email-sending phase.
+
+    Used when user chooses to reuse previously generated PDFs.
+    """
+    results = []
+    for emp in employees:
+        name = emp.get("name", "")
+        # Try to find existing PDF
+        expected_name = (
+            config.pdf_filename_pattern
+            .replace("{name}", name)
+            .replace("{mmyyyy}", config.date_mmyyyy)
+        )
+        pdf_path = config.output_dir / f"{expected_name}.pdf"
+        xlsx_path = config.output_dir / f"{expected_name}.xlsx"
+
+        if pdf_path.exists():
+            results.append({
+                "employee": emp,
+                "xlsx_path": xlsx_path if xlsx_path.exists() else None,
+                "pdf_path": str(pdf_path),
+                "success": True,
+                "skipped": True,
+                "pdf_skipped": True,
+            })
+        else:
+            # No PDF found for this employee — will need generation
+            results.append({
+                "employee": emp,
+                "xlsx_path": None,
+                "pdf_path": None,
+                "success": False,
+                "skipped": False,
+            })
+    return results
+
+
 def main():
     """Main entry point."""
     from office.utils.com import com_initialized
@@ -431,17 +526,51 @@ def main():
 
         # Show Summary & Get Confirmation
         show_summary_and_confirm(config, employees)
-        cleanup_output_files(config)
 
-        # Generate Payslips
-        results = generate_payslips(config, employees)
-        generated = sum(1 for r in results if r["success"] and not r.get("skipped"))
-        gen_skipped = sum(1 for r in results if r.get("skipped"))
+        # Check for existing PDFs to reuse
+        reuse_pdfs = check_reuse_existing_pdfs(config, employees)
 
-        # Convert to PDF
-        results = convert_to_pdf(config, results)
-        converted = sum(1 for r in results if r.get("pdf_path"))
-        pdf_skipped = sum(1 for r in results if r.get("pdf_skipped"))
+        if reuse_pdfs:
+            # Build results from existing PDFs
+            results = build_results_from_existing_pdfs(config, employees)
+            generated = 0
+            gen_skipped = sum(1 for r in results if r.get("skipped"))
+            converted = sum(1 for r in results if r.get("pdf_path"))
+            pdf_skipped = converted
+
+            # Check if any employees are missing PDFs
+            missing = [r for r in results if not r["success"]]
+            if missing:
+                cprint(
+                    f"{len(missing)} employee(s) missing PDFs — will generate them.",
+                    level="WARNING",
+                )
+                # Generate only for missing employees
+                missing_employees = [r["employee"] for r in missing]
+                cleanup_output_files(config)
+                missing_results = generate_payslips(config, missing_employees)
+                missing_results = convert_to_pdf(config, missing_results)
+                # Merge back
+                missing_by_mnv = {
+                    r["employee"]["mnv"]: r for r in missing_results
+                }
+                for i, r in enumerate(results):
+                    mnv = r["employee"].get("mnv", "")
+                    if mnv in missing_by_mnv:
+                        results[i] = missing_by_mnv[mnv]
+                generated = sum(1 for r in missing_results if r["success"] and not r.get("skipped"))
+        else:
+            cleanup_output_files(config)
+
+            # Generate Payslips
+            results = generate_payslips(config, employees)
+            generated = sum(1 for r in results if r["success"] and not r.get("skipped"))
+            gen_skipped = sum(1 for r in results if r.get("skipped"))
+
+            # Convert to PDF
+            results = convert_to_pdf(config, results)
+            converted = sum(1 for r in results if r.get("pdf_path"))
+            pdf_skipped = sum(1 for r in results if r.get("pdf_skipped"))
 
         # Compose & Send Emails
         results, composed = compose_emails(config, results, email_template, subject)
