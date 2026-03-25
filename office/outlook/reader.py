@@ -408,12 +408,23 @@ class OutlookReader(OutlookClient):
                 except Exception:
                     pass
 
+                # Read PR_ATTACH_FLAGS for ATT_MHTML_REF inline detection
+                attach_flags = 0
+                try:
+                    PR_ATTACH_FLAGS = "http://schemas.microsoft.com/mapi/proptag/0x37140003"
+                    flags = att.PropertyAccessor.GetProperty(PR_ATTACH_FLAGS)
+                    if flags is not None:
+                        attach_flags = int(flags)
+                except Exception:
+                    pass
+
                 attachments.append(Attachment(
                     filename=getattr(att, "FileName", f"attachment_{i}"),
                     size=getattr(att, "Size", 0),
                     content_type=getattr(att, "ContentType", ""),
                     attachment_type=getattr(att, "Type", 1),
                     content_id=content_id,
+                    attach_flags=attach_flags,
                     _com_attachment=att,
                 ))
         except Exception as e:
