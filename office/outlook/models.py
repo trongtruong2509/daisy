@@ -65,6 +65,9 @@ ATTACH_BY_REFERENCE = 4   # olByReference - shortcut to file
 ATTACH_EMBEDDED_ITEM = 5  # olEmbeddeditem - embedded Outlook item
 ATTACH_OLE = 6            # olOLE - OLE object
 
+# PR_ATTACH_FLAGS bit constants (MAPI property 0x37140003)
+ATT_MHTML_REF = 0x4       # Attachment is referenced from the HTML body (inline)
+
 
 @dataclass
 class Attachment:
@@ -77,6 +80,9 @@ class Attachment:
         content_type: MIME type of the attachment.
         attachment_type: Outlook attachment type constant (1=file, 5=embedded, 6=OLE).
         content_id: Content-ID for inline/embedded images (CID reference in HTML).
+        attach_flags: MAPI PR_ATTACH_FLAGS bitmask (0x37140003). When the
+            ATT_MHTML_REF bit (0x4) is set the attachment is referenced from
+            the HTML body and should be treated as inline.
         _com_attachment: Internal reference to COM object (not for external use).
     """
     filename: str
@@ -84,6 +90,7 @@ class Attachment:
     content_type: str = ""
     attachment_type: int = ATTACH_BY_VALUE
     content_id: str = ""
+    attach_flags: int = 0
     _com_attachment: object = field(default=None, repr=False, compare=False)
 
     @property
@@ -94,9 +101,21 @@ class Attachment:
         Inline attachments are referenced in the HTML body via CID and
         are typically header/footer images, logos, or signature graphics.
         They are not intended to be saved as standalone files.
+
+        Detection criteria (any one is sufficient):
+        - ``content_id`` is non-empty — attachment has a Content-ID header
+          and is referenced from the HTML body via ``<img src="cid:...">``.
+        - ``attach_flags & ATT_MHTML_REF`` — MAPI PR_ATTACH_FLAGS bit 0x4
+          is set, indicating Outlook tagged this attachment as an MHTML
+          inline reference (catches embedded images that lack a Content-ID).
+        - ``attachment_type == ATTACH_OLE`` — OLE-embedded object (e.g.
+          an in-place graphic inserted via Insert > Object).
         """
         # Has a Content-ID = inline image referenced in HTML body
         if self.content_id:
+            return True
+        # ATT_MHTML_REF flag (0x4) set in PR_ATTACH_FLAGS = inline reference
+        if bool(self.attach_flags & ATT_MHTML_REF):
             return True
         # OLE embedded objects are not regular file attachments
         if self.attachment_type == ATTACH_OLE:

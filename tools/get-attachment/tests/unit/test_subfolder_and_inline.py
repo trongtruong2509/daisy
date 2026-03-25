@@ -28,6 +28,7 @@ from office.outlook.models import (
     Attachment,
     ATTACH_BY_VALUE,
     ATTACH_OLE,
+    ATT_MHTML_REF,
 )
 
 
@@ -48,6 +49,7 @@ def make_attachment(
     filename: str,
     attachment_type: int = ATTACH_BY_VALUE,
     content_id: str = "",
+    attach_flags: int = 0,
 ) -> MagicMock:
     """Return a mock Attachment with inline detection support."""
     att = MagicMock(spec=Attachment)
@@ -56,9 +58,14 @@ def make_attachment(
     att.content_type = ""
     att.attachment_type = attachment_type
     att.content_id = content_id
+    att.attach_flags = attach_flags
 
     # Set up is_inline property to use actual logic
-    att.is_inline = bool(content_id) or (attachment_type == ATTACH_OLE)
+    att.is_inline = (
+        bool(content_id)
+        or bool(attach_flags & ATT_MHTML_REF)
+        or (attachment_type == ATTACH_OLE)
+    )
     att._com_attachment = MagicMock()
     return att
 
@@ -166,6 +173,39 @@ class TestAttachmentIsInline:
         )
         assert att.is_inline is False
 
+    def test_att_mhtml_ref_flag_is_inline(self):
+        """PR_ATTACH_FLAGS with ATT_MHTML_REF bit set marks attachment as inline."""
+        att = Attachment(
+            filename="banner.png",
+            size=3000,
+            attachment_type=ATTACH_BY_VALUE,
+            content_id="",
+            attach_flags=ATT_MHTML_REF,
+        )
+        assert att.is_inline is True
+
+    def test_att_mhtml_ref_combined_with_other_flags_is_inline(self):
+        """ATT_MHTML_REF bit (0x4) among other flags still detects inline."""
+        att = Attachment(
+            filename="sig.png",
+            size=2000,
+            attachment_type=ATTACH_BY_VALUE,
+            content_id="",
+            attach_flags=0x5,  # 0x1 | ATT_MHTML_REF (0x4) — combined bitmask
+        )
+        assert att.is_inline is True
+
+    def test_other_flags_without_att_mhtml_ref_not_inline(self):
+        """Flags without the ATT_MHTML_REF bit should not mark attachment inline."""
+        att = Attachment(
+            filename="report.pdf",
+            size=102400,
+            attachment_type=ATTACH_BY_VALUE,
+            content_id="",
+            attach_flags=0x2,  # ATT_INVISIBLE_IN_RTF only — not inline
+        )
+        assert att.is_inline is False
+
 
 # ── Downloader: inline image filtering ───────────────────────────
 
@@ -239,6 +279,27 @@ class TestInlineImageFiltering:
             dl._process_email(email, result)
 
         assert result.attachments_saved == 1
+
+    def test_att_mhtml_ref_attachment_skipped(self, tmp_path):
+        """Attachment with ATT_MHTML_REF flag (no content_id) is treated as inline."""
+        dl = self._downloader(tmp_path)
+        result = DownloadResult(emails_found=1)
+
+        mhtml_att = make_attachment("logo.png", attach_flags=ATT_MHTML_REF)
+        regular_att = make_attachment("invoice.pdf")
+
+        email = make_email(
+            subject="Invoice",
+            attachments=[mhtml_att, regular_att],
+        )
+        email.has_attachments = True
+
+        with patch("attachment_downloader._retry_save",
+                   return_value=(tmp_path / "invoice.pdf", "saved")):
+            dl._process_email(email, result)
+
+        assert result.emails_matched == 1
+        assert result.attachments_saved == 1  # Only the real attachment
 
 
 # ── Downloader.run(): subfolder navigation ───────────────────────
